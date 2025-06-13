@@ -135,8 +135,18 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
 }
 
 async function llamaFork(model: string) {
+    if (process.platform !== 'win32') {
+        // super hacky but need to clean up dangling processes.
+        child_process.spawn('killall', ['llama-server']).on('error', () => {});
+    }
+    else {
+        // windows doesn't have killall, so just kill the process by name.
+        child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']).on('error', () => {});
+    }
+
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
     const llamaBinary = await downloadLLama();
+
     const cp = child_process.spawn(llamaBinary,
         [
             '-hf', model,
@@ -145,6 +155,11 @@ async function llamaFork(model: string) {
         ],
         {
             stdio: ['pipe', 'pipe', 'pipe'],
+            cwd: path.dirname(llamaBinary),
+            env: {
+                ...process.env,
+                LLAMA_CACHE: path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, 'llama-cache'),
+            }
         }
     );
 
@@ -182,6 +197,10 @@ async function llamaFork(model: string) {
         }
     });
 
+    cp.on('error', () => {
+        process.exit();
+    });
+
     cp.on('exit', () => {
         process.exit();
     });
@@ -194,7 +213,7 @@ async function* llamaConnect(input: AsyncGenerator<Buffer>, options: {
     port: number,
     systemPrompt?: string,
 }) {
-    yield * connectStreamInternal(input, {
+    yield* connectStreamInternal(input, {
         baseURL: `http://127.0.0.1:${options.port}/v1`,
         name: options.name,
         systemPrompt: options.systemPrompt,
@@ -339,15 +358,6 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
 
     constructor(nativeId?: string) {
         super(nativeId);
-
-        if (process.platform !== 'win32') {
-            // super hacky but need to clean up dangling processes.
-            child_process.spawn('killall', ['llama-server']);
-        }
-        else {
-            // windows doesn't have killall, so just kill the process by name.
-            child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']);
-        }
     }
 
     async createDevice(settings: DeviceCreatorSettings): Promise<string> {
