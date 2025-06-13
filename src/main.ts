@@ -4,10 +4,7 @@ import { OpenAI } from 'openai';
 import child_process from 'child_process';
 import path from 'path';
 import { downloadLLama } from './download-llama';
-
-async function llamaFork(model: string) {
-    // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
-}
+import { Deferred } from '@scrypted/deferred';
 
 async function* connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
     name: string,
@@ -137,24 +134,132 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
     }
 }
 
+async function llamaFork(model: string) {
+    // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
+    const llamaBinary = await downloadLLama();
+    const cp = child_process.spawn(llamaBinary,
+        [
+            '-hf', model,
+            '-ngl', '999',
+            '--port', '0',
+        ],
+        {
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }
+    );
+
+    // When parent exits, kill the child
+    process.on('exit', () => {
+        cp.kill();
+    });
+
+    process.on('SIGINT', () => {
+        cp.kill();
+        process.exit();
+    });
+
+    const port = new Deferred<number>();
+
+    cp.stdout.on('data', (data: Buffer) => {
+        const str = data.toString();
+        console.log(str);
+    });
+
+    cp.stderr.on('data', (data: Buffer) => {
+        const str = data.toString();
+        console.error(str);
+        // main: server is listening on http://127.0.0.1:56369 - starting the main loop
+        if (str.includes('server is listening on')) {
+            // parse out the port
+            const match = str.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+            const portNumber = match?.[1];
+            if (!portNumber) {
+                console.error('Failed to parse port from llama server output:', str);
+                cp.kill();
+                return;
+            }
+            port.resolve(parseInt(portNumber, 10));
+        }
+    });
+
+    cp.on('exit', () => {
+        process.exit();
+    });
+
+    return port.promise;
+}
+
+async function* llamaConnect(input: AsyncGenerator<Buffer>, options: {
+    name: string,
+    port: number,
+    systemPrompt?: string,
+}) {
+    yield * connectStreamInternal(input, {
+        baseURL: `http://127.0.0.1:${options.port}/v1`,
+        name: options.name,
+        systemPrompt: options.systemPrompt,
+    });
+}
+
 class LlamaCPP extends BaseLLM implements OnOff {
-    forked: ReturnType<typeof sdk.fork<typeof fork>> | undefined;
+    forked: ReturnType<typeof sdk.fork<ReturnType<typeof fork>>> | undefined;
+    llamaPort: Promise<number> | undefined;
+
     llamaSettings = new StorageSettings(this, {
         model: {
             title: 'Model',
-            description: 'The hugging face model to use for the llama.cpp server.',
+            description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
             placeholder: 'unsloth/gemma-3-4b-it-GGUF',
             defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
+            choices: [
+                'unsloth/gemma-3-4b-it-GGUF',
+                'unsloth/gemma-3-12b-it-GGUF',
+                'unsloth/gemma-3-27b-it-GGUF',
+                'unsloth/Qwen2.5-VL-32B-Instruct-GGUF',
+                'unsloth/Qwen2.5-VL-7B-Instruct-GGUF',
+                'unsloth/Qwen2.5-VL-3B-Instruct-GGUF',
+            ],
             onPut: () => {
                 this.stopLlamaServer();
             }
+        },
+        clusterWorkerLabels: {
+            title: 'Cluster Worker Labels',
+            description: 'The labels to use for the cluster worker. This is used to determine which worker to run the llama server on.',
+            type: 'string',
+            multiple: true,
+            combobox: true,
+            choices: [
+                '@scrypted/coreml',
+                '@scrypted/openvino',
+                '@scrypted/onnx',
+                'compute',
+                'llm',
+            ],
+            onPut: () => {
+                this.stopLlamaServer();
+            },
+            defaultValue: [
+                'compute',
+            ],
+            async onGet() {
+                return {
+                    hide: !sdk.clusterManager?.getClusterMode(),
+                }
+            },
         }
     });
 
     async stopLlamaServer() {
         if (this.forked) {
-            this.forked.worker.terminate();
-            this.forked = undefined;
+            try {
+                const result = await this.forked.result;
+                await result.terminate();
+            }
+            catch (e) {
+                this.forked.worker.terminate();
+            }
+            this.console.warn('Terminated llama server fork.');
         }
     }
 
@@ -164,6 +269,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
 
     async turnOff() {
         this.on = false;
+        this.stopLlamaServer();
     }
 
     async getSettings(): Promise<Setting[]> {
@@ -181,21 +287,50 @@ class LlamaCPP extends BaseLLM implements OnOff {
     }
 
     async startLlamaServer() {
-        if (this.forked)
+        if (!this.on) {
+            this.stopLlamaServer();
             return;
-        await downloadLLama();
+        }
+        if (!this.forked) {
+            let labels: string[] | undefined = this.llamaSettings.values.clusterWorkerLabels;
+            if (!labels?.length)
+                labels = undefined;
+            this.forked = sdk.fork<ReturnType<typeof fork>>({
+                runtime: 'node',
+                labels: labels ? {
+                    require: labels,
+                } : undefined,
+                nativeId: this.nativeId,
+            });
+            this.llamaPort = (async () => {
+                const result = await this.forked!.result;
+                return result.llamaFork(this.llamaSettings.values.model);
+            })();
+            this.forked.worker.on('exit', () => {
+                this.forked = undefined;
+            });
+        }
+        return this.forked!;
     }
 
     async * connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
         systemPrompt?: string,
     }): AsyncGenerator<Buffer> {
-        // yield* connectStreamInternal(input, {
-        //     name: this.name!,
-        //     baseURL: this.openaiSettings.values.baseURL,
-        //     apiKey: this.openaiSettings.values.apiKey,
-        //     systemPrompt: this.storageSettings.values.systemPrompt,
-        //     model: this.openaiSettings.values.model,
-        // });
+        const forked = await this.startLlamaServer();
+        if (!forked) {
+            yield Buffer.from('Llama server is not running.\n');
+            return;
+        }
+
+        const result = await forked.result;
+        const port = await this.llamaPort!;
+        this.console.log('port', port);
+        const connect = await result.llamaConnect(input, {
+            name: this.name!,
+            port,
+            systemPrompt: options.systemPrompt,
+        });
+        yield* connect;
     }
 }
 
@@ -204,8 +339,16 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
 
     constructor(nativeId?: string) {
         super(nativeId);
-    }
 
+        if (process.platform !== 'win32') {
+            // super hacky but need to clean up dangling processes.
+            child_process.spawn('killall', ['llama-server']);
+        }
+        else {
+            // windows doesn't have killall, so just kill the process by name.
+            child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']);
+        }
+    }
 
     async createDevice(settings: DeviceCreatorSettings): Promise<string> {
         const randomHex = Math.random().toString(16).slice(2, 10);
@@ -224,10 +367,11 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             });
         }
         else if (settings.type === 'llama.cpp') {
-            return await sdk.deviceManager.onDeviceDiscovered({
+            const nativeId = 'llama-' + randomHex;
+            const id = await sdk.deviceManager.onDeviceDiscovered({
                 name: settings.name as string,
                 type: 'LLM',
-                nativeId: 'llama-' + randomHex,
+                nativeId,
                 interfaces: [
                     ScryptedInterface.TTY,
                     ScryptedInterface.StreamService,
@@ -235,6 +379,9 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
                     ScryptedInterface.OnOff,
                 ]
             });
+            const device = await this.getDevice(nativeId) as LlamaCPP;
+            device.on = true;
+            return id;
         }
         throw new Error('Unknown type: ' + settings.type);
     }
@@ -254,7 +401,7 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
                 title: 'Type',
                 type: 'radiopanel',
                 choices: [
-                    'OpenAI Compatible Endpoint',
+                    'OpenAI Endpoint',
                     'llama.cpp',
                 ],
             },
@@ -287,5 +434,15 @@ export default LLMPlugin;
 export async function fork() {
     return {
         llamaFork,
+        async llamaConnect(input: AsyncGenerator<Buffer>, options: {
+            name: string,
+            port: number,
+            systemPrompt?: string,
+        }) {
+            return llamaConnect(input, options);
+        },
+        async terminate() {
+            process.exit(0);
+        }
     }
 }
