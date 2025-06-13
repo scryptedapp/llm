@@ -126,6 +126,7 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
                         break;
 
                     for (const tc of assistantMessage.tool_calls) {
+                        yield Buffer.from(`\n\n> Calling tool: ${tc.function.name}\n\n`);
                         const response = await toolcall(tc);
                         if (response.startsWith('data:')) {
                             messages.push({
