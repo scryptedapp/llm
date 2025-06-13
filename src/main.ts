@@ -3,6 +3,7 @@ import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import { OpenAI } from 'openai';
 import child_process from 'child_process';
 import path from 'path';
+import { downloadLLama } from './download-llama';
 
 async function llamaFork(model: string) {
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
@@ -182,6 +183,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
     async startLlamaServer() {
         if (this.forked)
             return;
+        await downloadLLama();
     }
 
     async * connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
@@ -198,6 +200,8 @@ class LlamaCPP extends BaseLLM implements OnOff {
 }
 
 class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator {
+    devices = new Map<ScryptedNativeId, BaseLLM>();
+
     constructor(nativeId?: string) {
         super(nativeId);
     }
@@ -260,8 +264,21 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     }
 
     async getDevice(nativeId: ScryptedNativeId): Promise<any> {
-        if (nativeId?.startsWith('openai-'))
-            return new OpenAIEndpoint(nativeId);
+        let found = this.devices.get(nativeId);
+        if (found)
+            return found;
+
+        if (nativeId?.startsWith('openai-')) {
+            found = new OpenAIEndpoint(nativeId);
+            this.devices.set(nativeId, found);
+            return found;
+        }
+        if (nativeId?.startsWith('llama-')) {
+            const llama = new LlamaCPP(nativeId);
+            this.devices.set(nativeId, llama);
+            llama.startLlamaServer();
+            return llama;
+        }
     }
 }
 
