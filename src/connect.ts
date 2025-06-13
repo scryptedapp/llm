@@ -1,19 +1,72 @@
-import sdk, { LLMTools } from '@scrypted/sdk';
+import sdk, { LLMToolDefinition, LLMTools } from '@scrypted/sdk';
 import { OpenAI } from 'openai';
+import type { ChatCompletionContentPartImage } from 'openai/resources';
+import type { ParsedChatCompletion } from 'openai/resources/chat/completions.mjs';
 
-export async function* connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
-    name: string,
+export async function prepareTools(toolIds: string[]) {
+    const toolsPromises = toolIds.map(async tool => {
+        const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
+        const availableTools = await llmTools.getLLMTools();
+        return availableTools.map(tool => {
+            tool.parameters ||= {
+                "type": "object",
+                "properties": {
+                },
+                "required": [
+                ],
+                "additionalProperties": false
+            };
+            return {
+                llmTools,
+                tool,
+            };
+        });
+    });
+
+    const tools = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
+    const map: Record<string, string> = {};
+    for (const entry of tools) {
+        map[entry.tool.name] = entry.llmTools.id;
+    }
+
+    return {
+        map,
+        tools: tools.map(t => t.tool),
+    };
+}
+
+// this method is called on the cluster worker to connect to a localhost only socket that is inaccessible to the cluster server.
+export async function* connectStreamInternal(options: {
     baseURL: string,
     apiKey?: string,
-    systemPrompt?: string,
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     model?: string,
-    tools: string[],
-}): AsyncGenerator<Buffer> {
+    tools: LLMToolDefinition[],
+}): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | ParsedChatCompletion<null>> {
     const client = new OpenAI({
         baseURL: options.baseURL,
         apiKey: options.apiKey || 'api requires must not be empty',
     });
 
+    const stream = client.chat.completions.stream({
+        model: options.model!,
+        messages: options.messages,
+        tools: options.tools.map(tool => ({
+            type: 'function',
+            function: tool,
+        })),
+    });
+    for await (const chunk of stream) {
+        yield chunk;
+    }
+    yield await stream.finalChatCompletion();
+}
+
+export async function* connectStreamService(input: AsyncGenerator<Buffer>, options: {
+    name: string,
+    systemPrompt?: string,
+    functionCalls: boolean,
+}, toolcall: (tool: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => Promise<string>, cs: (messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) => AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | ParsedChatCompletion<null>>): AsyncGenerator<Buffer> {
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
     if (options.systemPrompt) {
@@ -24,6 +77,7 @@ export async function* connectStreamInternal(input: AsyncGenerator<Buffer>, opti
     }
 
     yield Buffer.from('> ');
+
     let curline = '';
     for await (const chunk of input) {
         if (!(chunk instanceof Buffer))
@@ -36,32 +90,86 @@ export async function* connectStreamInternal(input: AsyncGenerator<Buffer>, opti
                 });
                 curline = '';
 
-                const toolsPromises = options.tools.map(async tool => {
-                    const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
-                    const availableTools = await llmTools.getLLMTools();
-                    return availableTools;
-                });
+                let printedName = false;
 
-                const tools = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat()
-                    .map(tool => {
-                        tool.parameters ||= {};
-                        return {
-                            type: 'function' as const,
-                            function: tool,
-                        };
-                    });
+                while (true) {
+                    const assistantMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
+                        role: 'assistant',
+                        content: '',
+                    };
+                    for await (const token of cs(messages)) {
+                        if ('delta' in token.choices[0]) {
+                            if (token.choices[0].delta.content) {
+                                if (!printedName) {
+                                    printedName = true;
+                                    yield Buffer.from(`\n\n${options.name}:\n\n`);
+                                }
+                                assistantMessage.content += token.choices[0].delta.content;
+                                yield Buffer.from(token.choices[0].delta.content);
+                            }
+                        }
+                        else if ('tool_calls' in token.choices[0].message) {
+                            for (const toolCall of token.choices[0].message!.tool_calls!) {
+                                if (toolCall.function?.name) {
+                                    assistantMessage.tool_calls ||= [];
+                                    assistantMessage.tool_calls.push(toolCall as any);
+                                }
+                            }
+                        }
+                        else {
+                            yield Buffer.from('');
+                        }
+                    }
+                    messages.push(assistantMessage);
 
+                    if (!assistantMessage.tool_calls)
+                        break;
 
-                const stream = client.chat.completions.stream({
-                    model: options.model!,
-                    messages,
-                    tools,
-                });
+                    for (const tc of assistantMessage.tool_calls) {
+                        const response = await toolcall(tc);
+                        if (response.startsWith('data:')) {
+                            messages.push({
+                                role: 'tool',
+                                tool_call_id: tc.id,
+                                content: 'The next user message will include the image.',
+                            });
+                            messages.push({
+                                role: 'assistant',
+                                content: 'Ok.',
+                            });
 
-                yield Buffer.from(`\n\n${options.name}:\n\n`);
+                            const image: ChatCompletionContentPartImage = {
+                                type: 'image_url',
+                                image_url: {
+                                    url: response,
+                                },
+                            };
+                            messages.push({
+                                role: 'user',
+                                content: [
+                                    image,
+                                ],
+                            });
+                        }
+                        else {
+                            messages.push({
+                                role: 'tool',
+                                tool_call_id: tc.id,
+                                content: response,
+                            });
+                        }
 
-                for await (const token of stream) {
-                    yield token.choices[0].delta.content ? Buffer.from(token.choices[0].delta.content) : Buffer.from('');
+                        if (options.functionCalls) {
+                            assistantMessage.function_call = {
+                                name: tc.function.name,
+                                arguments: tc.function.arguments!,
+                            }
+                        }
+                    }
+
+                    if (options.functionCalls) {
+                        delete assistantMessage.tool_calls;
+                    }
                 }
 
                 yield Buffer.from('\n\n> ');

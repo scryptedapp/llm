@@ -1,12 +1,13 @@
 import { Deferred } from '@scrypted/deferred';
-import sdk, { DeviceCreator, DeviceCreatorSettings, DeviceProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import sdk, { DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMToolDefinition, LLMTools, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
+import { once } from 'events';
+import { OpenAI } from 'openai';
 import path from 'path';
-import { connectStreamInternal } from './connect';
+import { connectStreamInternal, connectStreamService, prepareTools } from './connect';
 import { downloadLLama } from './download-llama';
 import { CameraTools } from './tools';
-import { once } from 'events';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY {
     storageSettings = new StorageSettings(this, {
@@ -56,19 +57,53 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
             description: 'The API key for the OpenAI compatible endpoint.',
             type: 'password',
         },
+        functionCalls: {
+            title: 'Legacy Function Calls',
+            description: 'Use function calls rather than tool calls for legacy providers like LMStudio.',
+            type: 'boolean',
+        },
     });
 
     async * connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
         systemPrompt?: string,
     }): AsyncGenerator<Buffer> {
-        yield* connectStreamInternal(input, {
-            name: this.name!,
-            baseURL: this.openaiSettings.values.baseURL,
-            apiKey: this.openaiSettings.values.apiKey,
-            systemPrompt: this.storageSettings.values.systemPrompt,
-            model: this.openaiSettings.values.model,
-            tools: this.storageSettings.values.tools,
-        });
+        const self = this;
+        const tools = await prepareTools(self.storageSettings.values.tools);
+
+        yield* connectStreamService(input,
+            {
+                name: this.name!,
+                systemPrompt: this.storageSettings.values.systemPrompt,
+                functionCalls: this.openaiSettings.values.functionCalls,
+            },
+            async toolCall => {
+                try {
+                    const toolId = tools.map[toolCall.function.name];
+                    if (!toolId)
+                        throw new Error(`Tool ${toolCall} not found.`);
+
+                    const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
+                    if (!tool)
+                        throw new Error(`Tool ${toolCall} not found.`);
+                    if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
+                        throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
+                    const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
+                    return result;
+                }
+                catch (e) {
+                    return 'There was an error calling the tool: ' + e;
+                }
+            },
+            async function* connect(messages) {
+                yield* connectStreamInternal({
+                    baseURL: self.openaiSettings.values.baseURL,
+                    apiKey: self.openaiSettings.values.apiKey,
+                    messages,
+                    tools: tools.tools,
+                    model: self.openaiSettings.values.model,
+                });
+            }
+        );
     }
 
     async getSettings(): Promise<Setting[]> {
@@ -89,11 +124,11 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
 async function llamaFork(model: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
-        await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => {});
+        await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => { });
     }
     else {
         // windows doesn't have killall, so just kill the process by name.
-        await once(child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']), 'exit').catch(() => {});
+        await once(child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']), 'exit').catch(() => { });
     }
 
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
@@ -167,16 +202,15 @@ async function llamaFork(model: string) {
     return port.promise;
 }
 
-async function* llamaConnect(input: AsyncGenerator<Buffer>, options: {
+async function* llamaConnect(options: {
     name: string,
     port: number,
-    systemPrompt?: string,
-    tools: string[],
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    tools: LLMToolDefinition[],
 }) {
-    yield* connectStreamInternal(input, {
+    yield* connectStreamInternal({
         baseURL: `http://127.0.0.1:${options.port}/v1`,
-        name: options.name,
-        systemPrompt: options.systemPrompt,
+        messages: options.messages,
         tools: options.tools,
     });
 }
@@ -305,12 +339,50 @@ class LlamaCPP extends BaseLLM implements OnOff {
         const result = await forked.result;
         const port = await this.llamaPort!;
         this.console.log('port', port);
-        const connect = await result.llamaConnect(input, {
-            name: this.name!,
-            port,
-            systemPrompt: options.systemPrompt,
-            tools: this.storageSettings.values.tools,
-        });
+
+        const self = this;
+
+        const tools = await prepareTools(self.storageSettings.values.tools);
+
+        const connect = connectStreamService(input,
+            {
+                name: this.name!,
+                systemPrompt: this.storageSettings.values.systemPrompt,
+                functionCalls: false,
+            },
+            async toolCall => {
+                try {
+                    const toolId = tools.map[toolCall.function.name];
+                    if (!toolId)
+                        throw new Error(`Tool ${toolCall} not found.`);
+
+                    const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
+                    if (!tool)
+                        throw new Error(`Tool ${toolCall} not found.`);
+                    if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
+                        throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
+                    const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
+                    return result;
+                }
+                catch (e) {
+                    return 'There was an error calling the tool: ' + e;
+                }
+            },
+            async function* connect(messages) {
+
+                const connect = await result.llamaConnect({
+                    messages,
+                    name: self.name!,
+                    port: port,
+                    tools: tools.tools,
+                });
+                for await (const chunk of connect) {
+                    yield chunk;
+                }
+            }
+        );
+
+
         yield* connect;
     }
 }
@@ -466,13 +538,13 @@ export default LLMPlugin;
 export async function fork() {
     return {
         llamaFork,
-        async llamaConnect(input: AsyncGenerator<Buffer>, options: {
+        async llamaConnect(options: {
             name: string,
             port: number,
-            systemPrompt?: string,
-            tools: string[],
+            messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+            tools: LLMToolDefinition[],
         }) {
-            return llamaConnect(input, options);
+            return llamaConnect(options);
         },
         async terminate() {
             process.exit(0);
