@@ -2,6 +2,7 @@ import sdk, { PluginFork, DeviceCreator, DeviceCreatorSettings, DeviceProvider, 
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import { OpenAI } from 'openai';
 import child_process from 'child_process';
+import path from 'path';
 
 async function llamaFork(model: string) {
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
