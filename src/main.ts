@@ -1,71 +1,12 @@
-import sdk, { PluginFork, DeviceCreator, DeviceCreatorSettings, DeviceProvider, OnOff, ScryptedDeviceBase, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import { Deferred } from '@scrypted/deferred';
+import sdk, { DeviceCreator, DeviceCreatorSettings, DeviceProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
-import { OpenAI } from 'openai';
 import child_process from 'child_process';
 import path from 'path';
+import { connectStreamInternal } from './connect';
 import { downloadLLama } from './download-llama';
-import { Deferred } from '@scrypted/deferred';
-
-async function* connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
-    name: string,
-    baseURL: string,
-    apiKey?: string,
-    systemPrompt?: string,
-    model?: string
-}): AsyncGenerator<Buffer> {
-    const client = new OpenAI({
-        baseURL: options.baseURL,
-        apiKey: options.apiKey || 'api requires must not be empty',
-    });
-
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-
-    if (options.systemPrompt) {
-        messages.push({
-            role: 'system',
-            content: options.systemPrompt,
-        });
-    }
-
-    yield Buffer.from('> ');
-    let curline = '';
-    for await (const chunk of input) {
-        if (!(chunk instanceof Buffer))
-            continue;
-        for (const c of chunk.toString()) {
-            if (c === '\r') {
-                messages.push({
-                    role: 'user',
-                    content: curline,
-                });
-                curline = '';
-
-                const stream = client.chat.completions.stream({
-                    model: options.model!,
-                    messages,
-                });
-
-                yield Buffer.from(`\n\n${options.name}:\n\n`);
-
-                for await (const token of stream) {
-                    yield token.choices[0].delta.content ? Buffer.from(token.choices[0].delta.content) : Buffer.from('');
-                }
-
-                yield Buffer.from('\n\n> ');
-                continue;
-            }
-            if (c.charCodeAt(0) === 127) {
-                if (curline.length === 0)
-                    continue;
-                curline = curline.slice(0, -1);
-                yield Buffer.from('\b \b');
-                continue;
-            }
-            curline += c;
-            yield Buffer.from(c);
-        }
-    }
-}
+import { CameraTools } from './tools';
+import { once } from 'events';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY {
     storageSettings = new StorageSettings(this, {
@@ -74,6 +15,16 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             description: 'The system prompt to use for the OpenAI compatible endpoint.',
             type: 'textarea',
             placeholder: 'You are a helpful assistant.',
+        },
+        tools: {
+            title: 'Tools',
+            description: 'The tools available to this LLM.',
+            type: 'device',
+            deviceFilter: ({ interfaces, ScryptedInterface }) => {
+                return interfaces.includes("LLMTools");
+            },
+            multiple: true,
+            defaultValue: [],
         }
     });
 
@@ -116,6 +67,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
             apiKey: this.openaiSettings.values.apiKey,
             systemPrompt: this.storageSettings.values.systemPrompt,
             model: this.openaiSettings.values.model,
+            tools: this.storageSettings.values.tools,
         });
     }
 
@@ -137,11 +89,11 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
 async function llamaFork(model: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
-        child_process.spawn('killall', ['llama-server']).on('error', () => { });
+        await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => {});
     }
     else {
         // windows doesn't have killall, so just kill the process by name.
-        child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']).on('error', () => { });
+        await once(child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']), 'exit').catch(() => {});
     }
 
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
@@ -152,6 +104,7 @@ async function llamaFork(model: string) {
             '-hf', model,
             '-ngl', '999',
             '--port', '0',
+            '--jinja',
         ],
         {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -198,11 +151,17 @@ async function llamaFork(model: string) {
     });
 
     cp.on('error', () => {
-        process.exit();
+        console.error('Failed to start llama server.');
+        setTimeout(() => {
+            process.exit();
+        }, 5000);
     });
 
     cp.on('exit', () => {
-        process.exit();
+        console.log('Llama server exited.');
+        setTimeout(() => {
+            process.exit();
+        }, 5000);
     });
 
     return port.promise;
@@ -212,11 +171,13 @@ async function* llamaConnect(input: AsyncGenerator<Buffer>, options: {
     name: string,
     port: number,
     systemPrompt?: string,
+    tools: string[],
 }) {
     yield* connectStreamInternal(input, {
         baseURL: `http://127.0.0.1:${options.port}/v1`,
         name: options.name,
         systemPrompt: options.systemPrompt,
+        tools: options.tools,
     });
 }
 
@@ -319,7 +280,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
                 labels: labels ? {
                     require: labels,
                 } : undefined,
-                nativeId: this.nativeId,
+                id: this.id,
             });
             this.llamaPort = (async () => {
                 const result = await this.forked!.result;
@@ -348,6 +309,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
             name: this.name!,
             port,
             systemPrompt: options.systemPrompt,
+            tools: this.storageSettings.values.tools,
         });
         yield* connect;
     }
@@ -358,6 +320,16 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
 
     constructor(nativeId?: string) {
         super(nativeId);
+
+        sdk.deviceManager.onDeviceDiscovered({
+            nativeId: 'tools',
+            name: 'Camera Tools',
+            type: ScryptedDeviceType.API,
+            interfaces: [
+                ScryptedInterface.Settings,
+                ScryptedInterface.LLMTools,
+            ],
+        });
     }
 
     async createDevice(settings: DeviceCreatorSettings): Promise<string> {
@@ -468,6 +440,9 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     }
 
     async getDevice(nativeId: ScryptedNativeId): Promise<any> {
+        if (nativeId === 'tools')
+            return new CameraTools(nativeId);
+
         let found = this.devices.get(nativeId);
         if (found)
             return found;
@@ -495,6 +470,7 @@ export async function fork() {
             name: string,
             port: number,
             systemPrompt?: string,
+            tools: string[],
         }) {
             return llamaConnect(input, options);
         },
