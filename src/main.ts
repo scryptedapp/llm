@@ -137,11 +137,11 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
 async function llamaFork(model: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
-        child_process.spawn('killall', ['llama-server']).on('error', () => {});
+        child_process.spawn('killall', ['llama-server']).on('error', () => { });
     }
     else {
         // windows doesn't have killall, so just kill the process by name.
-        child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']).on('error', () => {});
+        child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']).on('error', () => { });
     }
 
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
@@ -396,8 +396,13 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         throw new Error('Unknown type: ' + settings.type);
     }
 
-    async releaseDevice(device: any) {
-
+    async releaseDevice(id: string, nativeId: ScryptedNativeId): Promise<void> {
+        const device = this.devices.get(nativeId);
+        this.devices.delete(nativeId);
+        if (device instanceof LlamaCPP) {
+            await device.turnOff();
+            await device.stopLlamaServer();
+        }
     }
 
     async getCreateDeviceSettings(): Promise<Setting[]> {
@@ -415,6 +420,48 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
                     'llama.cpp',
                 ],
             },
+            model: {
+                title: 'Model',
+                description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
+                placeholder: 'unsloth/gemma-3-4b-it-GGUF',
+                defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
+                radioGroups: [
+                    'llama.cpp',
+                ],
+                choices: [
+                    'unsloth/gemma-3-4b-it-GGUF',
+                    'unsloth/gemma-3-12b-it-GGUF',
+                    'unsloth/gemma-3-27b-it-GGUF',
+                    'unsloth/Qwen2.5-VL-32B-Instruct-GGUF',
+                    'unsloth/Qwen2.5-VL-7B-Instruct-GGUF',
+                    'unsloth/Qwen2.5-VL-3B-Instruct-GGUF',
+                ],
+            },
+            clusterWorkerLabels: {
+                title: 'Cluster Worker Labels',
+                description: 'The labels to use for the cluster worker. This is used to determine which worker to run the llama server on.',
+                type: 'string',
+                multiple: true,
+                combobox: true,
+                radioGroups: [
+                    'llama.cpp',
+                ],
+                choices: [
+                    '@scrypted/coreml',
+                    '@scrypted/openvino',
+                    '@scrypted/onnx',
+                    'compute',
+                    'llm',
+                ],
+                async onGet() {
+                    return {
+                        hide: !sdk.clusterManager?.getClusterMode(),
+                    }
+                },
+                defaultValue: [
+                    'compute',
+                ],
+            }
         });
 
         return storageSettings.getSettings();
