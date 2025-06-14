@@ -2,7 +2,9 @@ import sdk, { LLMToolDefinition, LLMTools } from '@scrypted/sdk';
 import { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage } from 'openai/resources';
 import type { ParsedChatCompletion } from 'openai/resources/chat/completions.mjs';
-
+import { PassThrough } from 'stream';
+import { createInterface } from 'readline';
+import { createAsyncQueue } from '@scrypted/deferred';
 export async function prepareTools(toolIds: string[]) {
     const toolsPromises = toolIds.map(async tool => {
         const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
@@ -77,108 +79,134 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
         });
     }
 
-    yield Buffer.from('> ');
+    const i = new PassThrough();
+    const o = new PassThrough();
+    const q = createAsyncQueue<Buffer>();
+    o.on('data', (chunk) => {
+        q.submit(chunk);
+    });
 
-    let curline = '';
-    for await (const chunk of input) {
-        if (!(chunk instanceof Buffer))
-            continue;
-        for (const c of chunk.toString()) {
-            if (c === '\r') {
-                messages.push({
-                    role: 'user',
-                    content: curline,
-                });
-                curline = '';
+    const rl = createInterface({
+        input: i,
+        output: o,
+        terminal: true,
+        prompt: '> ',
+    });
+    rl.prompt();
 
-                let printedName = false;
+    let processing = false;
 
-                while (true) {
-                    let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
-                    for await (const token of cs(messages)) {
-                        lastAssistantMessage = token as any;
-                        if ('delta' in token.choices[0]) {
-                            if (token.choices[0].delta.content) {
-                                if (!printedName) {
-                                    printedName = true;
-                                    yield Buffer.from(`\n\n${options.name}:\n\n`);
-                                }
-                                yield Buffer.from(token.choices[0].delta.content);
+    (async () => {
+        try {
+            for await (const chunk of input) {
+                // terminal message are json
+                if (!(chunk instanceof Buffer))
+                    continue;
+                i.push(chunk);
+            }
+        }
+        catch (e) {
+        }
+        finally {
+            i.destroy();
+            o.destroy();
+            rl.close();
+        }
+    })();
+
+    rl.on('line', async (line) => {
+        if (!line) {
+            rl.prompt();
+            return;
+        }
+        if (processing)
+            return;
+        processing = true;
+        messages.push({
+            role: 'user',
+            content: line,
+        });
+        try {
+            let printedName = false;
+
+            while (true) {
+                let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
+                for await (const token of cs(messages)) {
+                    lastAssistantMessage = token as any;
+                    if ('delta' in token.choices[0]) {
+                        if (token.choices[0].delta.content) {
+                            if (!printedName) {
+                                printedName = true;
+                                q.submit(Buffer.from(`\n\n${options.name}:\n\n`));
                             }
-                        }
-                        else {
-                            yield Buffer.from('');
+                            q.submit(Buffer.from(token.choices[0].delta.content));
                         }
                     }
-                    console.log(lastAssistantMessage);
-                    const message = lastAssistantMessage!.choices[0].message!;
-                    messages.push(message);
+                }
+                q.submit(Buffer.from('\n\n'));
+                console.log(lastAssistantMessage);
+                const message = lastAssistantMessage!.choices[0].message!;
+                messages.push(message);
 
-                    if (!message.tool_calls)
-                        break;
+                if (!message.tool_calls)
+                    break;
 
-                    for (const tc of message.tool_calls) {
-                        yield Buffer.from(`\n\n>${options.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`);
-                        const response = await toolcall(tc);
-                        // tool calls cant return images, so fake it out by having the tool respond
-                        // that the next user message will include the image and the assistant respond ok.
-                        if (response.startsWith('data:')) {
-                            messages.push({
-                                role: 'tool',
-                                tool_call_id: tc.id,
-                                content: 'The next user message will include the image.',
-                            });
-                            messages.push({
-                                role: 'assistant',
-                                content: 'Ok.',
-                            });
+                for (const tc of message.tool_calls) {
+                    q.submit(Buffer.from(`\n\n${options.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
+                    const response = await toolcall(tc);
+                    // tool calls cant return images, so fake it out by having the tool respond
+                    // that the next user message will include the image and the assistant respond ok.
+                    if (response.startsWith('data:')) {
+                        messages.push({
+                            role: 'tool',
+                            tool_call_id: tc.id,
+                            content: 'The next user message will include the image.',
+                        });
+                        messages.push({
+                            role: 'assistant',
+                            content: 'Ok.',
+                        });
 
-                            const image: ChatCompletionContentPartImage = {
-                                type: 'image_url',
-                                image_url: {
-                                    url: response,
-                                },
-                            };
-                            messages.push({
-                                role: 'user',
-                                content: [
-                                    image,
-                                ],
-                            });
-                        }
-                        else {
-                            messages.push({
-                                role: 'tool',
-                                tool_call_id: tc.id,
-                                content: response,
-                            });
-                        }
-
-                        if (options.functionCalls) {
-                            message.function_call = {
-                                name: tc.function.name,
-                                arguments: tc.function.arguments!,
-                            }
-                        }
+                        const image: ChatCompletionContentPartImage = {
+                            type: 'image_url',
+                            image_url: {
+                                url: response,
+                            },
+                        };
+                        messages.push({
+                            role: 'user',
+                            content: [
+                                image,
+                            ],
+                        });
+                    }
+                    else {
+                        messages.push({
+                            role: 'tool',
+                            tool_call_id: tc.id,
+                            content: response,
+                        });
                     }
 
                     if (options.functionCalls) {
-                        delete message.tool_calls;
+                        message.function_call = {
+                            name: tc.function.name,
+                            arguments: tc.function.arguments!,
+                        }
                     }
                 }
 
-                yield Buffer.from('\n\n> ');
-                continue;
+                if (options.functionCalls) {
+                    delete message.tool_calls;
+                }
             }
-            if (c.charCodeAt(0) === 127) {
-                if (curline.length === 0)
-                    continue;
-                curline = curline.slice(0, -1);
-                yield Buffer.from('\b \b');
-                continue;
-            }
-            curline += c;
-            yield Buffer.from(c);
+
         }
-    }
+        finally {
+            processing = false;
+            rl.prompt();
+        }
+    });
+
+    yield* q.queue;
 }
