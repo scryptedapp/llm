@@ -146,7 +146,7 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
     ];
 
     if (apiKey)
-        args.push('--api-key', apiKey)
+        args.push('--api-key', apiKey);
 
     const cp = child_process.spawn(llamaBinary,
         args,
@@ -183,7 +183,7 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
         // main: server is listening on http://127.0.0.1:56369 - starting the main loop
         if (str.includes('server is listening on')) {
             // parse out the port
-            const match = str.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+            const match = str.match(/http:\/\/\d+\.\d+\.\d+\.\d+:(\d+)/);
             const portNumber = match?.[1];
             if (!portNumber) {
                 console.error('Failed to parse port from llama server output:', str);
@@ -214,11 +214,13 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
 async function* llamaConnect(options: {
     name: string,
     port: number,
+    apiKey: string,
     messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     tools: LLMToolDefinition[],
 }) {
     yield* connectStreamInternal({
         baseURL: `http://127.0.0.1:${options.port}/v1`,
+        apiKey: options.apiKey,
         messages: options.messages,
         tools: options.tools,
     });
@@ -401,6 +403,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
                     messages,
                     name: self.name!,
                     port: port,
+                    apiKey: self.llamaSettings.values.apiKey,
                     tools: tools.tools,
                 });
                 for await (const chunk of connect) {
@@ -567,6 +570,7 @@ export async function fork() {
         async llamaConnect(options: {
             name: string,
             port: number,
+            apiKey: string,
             messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
             tools: LLMToolDefinition[],
         }) {

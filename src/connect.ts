@@ -47,7 +47,7 @@ export async function* connectStreamInternal(options: {
 }): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | ParsedChatCompletion<null>> {
     const client = new OpenAI({
         baseURL: options.baseURL,
-        apiKey: options.apiKey || 'api requires must not be empty',
+        apiKey: options.apiKey || 'api key must not be empty',
     });
 
     const stream = client.chat.completions.stream({
