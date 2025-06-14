@@ -36,7 +36,7 @@
    },
    "dependencies": {
       "@scrypted/deferred": "^0.0.5",
-      "@scrypted/sdk": "^0.5.13",
+      "@scrypted/sdk": "^0.5.16",
       "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",
       "openai": "^5.3.0"
@@ -46,5 +46,5 @@
       "@types/follow-redirects": "^1.14.4",
       "@types/node": "^24.0.1"
    },
-   "version": "0.0.8"
+   "version": "0.0.9"
 }

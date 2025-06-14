@@ -1,5 +1,6 @@
 import { Deferred } from '@scrypted/deferred';
-import sdk, { DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMToolDefinition, LLMTools, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import type { ChatCompletionTool, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import sdk, { ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
@@ -216,7 +217,7 @@ async function* llamaConnect(options: {
     port: number,
     apiKey: string,
     messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-    tools: LLMToolDefinition[],
+    tools: ChatCompletionTool[],
 }) {
     yield* connectStreamInternal({
         baseURL: `http://127.0.0.1:${options.port}/v1`,
@@ -572,7 +573,7 @@ export async function fork() {
             port: number,
             apiKey: string,
             messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-            tools: LLMToolDefinition[],
+            tools: ChatCompletionTool[],
         }) {
             return llamaConnect(options);
         },

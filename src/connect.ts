@@ -1,16 +1,18 @@
-import sdk, { LLMToolDefinition, LLMTools } from '@scrypted/sdk';
+import { createAsyncQueue } from '@scrypted/deferred';
+import type { ChatCompletionTool, LLMTools } from '@scrypted/sdk';
+import sdk from '@scrypted/sdk';
 import { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage } from 'openai/resources';
 import type { ParsedChatCompletion } from 'openai/resources/chat/completions.mjs';
-import { PassThrough } from 'stream';
 import { createInterface } from 'readline';
-import { createAsyncQueue } from '@scrypted/deferred';
+import { PassThrough } from 'stream';
+
 export async function prepareTools(toolIds: string[]) {
     const toolsPromises = toolIds.map(async tool => {
         const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
         const availableTools = await llmTools.getLLMTools();
         return availableTools.map(tool => {
-            tool.parameters ||= {
+            tool.function.parameters ||= {
                 "type": "object",
                 "properties": {
                 },
@@ -28,7 +30,7 @@ export async function prepareTools(toolIds: string[]) {
     const tools = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
     const map: Record<string, string> = {};
     for (const entry of tools) {
-        map[entry.tool.name] = entry.llmTools.id;
+        map[entry.tool.function.name] = entry.llmTools.id;
     }
 
     return {
@@ -43,7 +45,7 @@ export async function* connectStreamInternal(options: {
     apiKey?: string,
     messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     model?: string,
-    tools: LLMToolDefinition[],
+    tools: ChatCompletionTool[],
 }): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | ParsedChatCompletion<null>> {
     const client = new OpenAI({
         baseURL: options.baseURL,
@@ -53,10 +55,7 @@ export async function* connectStreamInternal(options: {
     const stream = client.chat.completions.stream({
         model: options.model!,
         messages: options.messages,
-        tools: options.tools.map(tool => ({
-            type: 'function',
-            function: tool,
-        })),
+        tools: options.tools,
     });
     for await (const chunk of stream) {
         yield chunk;

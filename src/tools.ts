@@ -1,28 +1,34 @@
-import sdk, { Camera, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
-import { LLMToolDefinition, LLMTools, ScryptedDeviceBase } from "@scrypted/sdk";
+import type { ChatCompletionTool, LLMTools, } from "@scrypted/sdk";
+import sdk, { Camera, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
 
 export class CameraTools extends ScryptedDeviceBase implements LLMTools {
-    async getLLMTools(): Promise<LLMToolDefinition[]> {
+    async getLLMTools(): Promise<ChatCompletionTool[]> {
         return [
             {
-                name: 'list-cameras',
-                description: 'List the cameras available to view.',
+                type: 'function',
+                function: {
+                    name: 'list-cameras',
+                    description: 'List the cameras available to view.',
+                },
             },
             {
-                name: 'take-picture',
-                description: 'Takes a picture on a given camera and provides the response as base64 encoded jpeg.',
-                parameters: {
-                    "type": "object",
-                    "properties": {
-                        "camera": {
-                            "type": "string",
-                            "description": "The name of the camera to take a picture from. Use the list-cameras tool to get a list of available cameras.",
+                type: 'function',
+                function: {
+                    name: 'take-picture',
+                    description: 'Takes a picture on a given camera and provides the response as base64 encoded jpeg.',
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "camera": {
+                                "type": "string",
+                                "description": "The name of the camera to take a picture from. Use the list-cameras tool to get a list of available cameras.",
+                            },
                         },
+                        "required": [
+                            "camera",
+                        ],
+                        "additionalProperties": false
                     },
-                    "required": [
-                        "camera",
-                    ],
-                    "additionalProperties": false
                 },
             },
         ];
