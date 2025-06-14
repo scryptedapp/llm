@@ -59,7 +59,8 @@ export async function* connectStreamInternal(options: {
     for await (const chunk of stream) {
         yield chunk;
     }
-    yield await stream.finalChatCompletion();
+    const last = await stream.finalChatCompletion();
+    yield last;
 }
 
 export async function* connectStreamService(input: AsyncGenerator<Buffer>, options: {
@@ -93,41 +94,34 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
                 let printedName = false;
 
                 while (true) {
-                    const assistantMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
-                        role: 'assistant',
-                        content: '',
-                    };
+                    let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
                     for await (const token of cs(messages)) {
+                        lastAssistantMessage = token as any;
                         if ('delta' in token.choices[0]) {
                             if (token.choices[0].delta.content) {
                                 if (!printedName) {
                                     printedName = true;
                                     yield Buffer.from(`\n\n${options.name}:\n\n`);
                                 }
-                                assistantMessage.content += token.choices[0].delta.content;
                                 yield Buffer.from(token.choices[0].delta.content);
-                            }
-                        }
-                        else if ('tool_calls' in token.choices[0].message) {
-                            for (const toolCall of token.choices[0].message!.tool_calls!) {
-                                if (toolCall.function?.name) {
-                                    assistantMessage.tool_calls ||= [];
-                                    assistantMessage.tool_calls.push(toolCall as any);
-                                }
                             }
                         }
                         else {
                             yield Buffer.from('');
                         }
                     }
-                    messages.push(assistantMessage);
+                    console.log(lastAssistantMessage);
+                    const message = lastAssistantMessage!.choices[0].message!;
+                    messages.push(message);
 
-                    if (!assistantMessage.tool_calls)
+                    if (!message.tool_calls)
                         break;
 
-                    for (const tc of assistantMessage.tool_calls) {
+                    for (const tc of message.tool_calls) {
                         yield Buffer.from(`\n\n> Calling tool: ${tc.function.name}\n\n`);
                         const response = await toolcall(tc);
+                        // tool calls cant return images, so fake it out by having the tool respond
+                        // that the next user message will include the image and the assistant respond ok.
                         if (response.startsWith('data:')) {
                             messages.push({
                                 role: 'tool',
@@ -161,7 +155,7 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
                         }
 
                         if (options.functionCalls) {
-                            assistantMessage.function_call = {
+                            message.function_call = {
                                 name: tc.function.name,
                                 arguments: tc.function.arguments!,
                             }
@@ -169,7 +163,7 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
                     }
 
                     if (options.functionCalls) {
-                        delete assistantMessage.tool_calls;
+                        delete message.tool_calls;
                     }
                 }
 
