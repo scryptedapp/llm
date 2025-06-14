@@ -34,24 +34,27 @@ export class CameraTools extends ScryptedDeviceBase implements LLMTools {
         ];
     }
 
+    listCameras() {
+        const ids = Object.keys(sdk.systemManager.getSystemState());
+        const cameraIds = ids.filter(id => {
+            const device = sdk.systemManager.getDeviceById(id);
+            return device.interfaces.includes(ScryptedInterface.Camera) && (device.type === ScryptedDeviceType.Camera || device.type === ScryptedDeviceType.Doorbell);
+        });
+        return cameraIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
+    }
+
     async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
         if (name === 'list-cameras') {
-            const ids = Object.keys(sdk.systemManager.getSystemState());
-            const cameraIds = ids.filter(id => {
-                const device = sdk.systemManager.getDeviceById(id);
-                return device.interfaces.includes(ScryptedInterface.Camera) && (device.type === ScryptedDeviceType.Camera || device.type === ScryptedDeviceType.Doorbell);
-            });
-            return cameraIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
+            return this.listCameras();
         }
+
         if (name === 'take-picture') {
             const cameraName = parameters.camera;
-            if (!cameraName) {
-                throw new Error('camera parameter is required for take-picture tool.');
-            }
+            if (!cameraName)
+                return `"camera" parameter is required for take-picture tool. Valid camera names are: ${this.listCameras()}`;
             const camera = sdk.systemManager.getDeviceByName<Camera>(cameraName);
-            if (!camera || !camera.interfaces.includes(ScryptedInterface.Camera)) {
-                throw new Error(`Camera with name ${cameraName} not found or does not support taking pictures.`);
-            }
+            if (!camera || !camera.interfaces.includes(ScryptedInterface.Camera))
+                return `${cameraName} is not a valid camera. Valid camera names are: ${this.listCameras()}`;
             const picture = await camera.takePicture();
             const buffer = await sdk.mediaManager.convertMediaObjectToBuffer(picture, 'image/jpeg');
             return 'data:image/jpeg;base64,' + buffer.toString('base64');
