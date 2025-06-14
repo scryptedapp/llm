@@ -1,16 +1,51 @@
-import { Deferred } from '@scrypted/deferred';
-import type { ChatCompletionTool, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import { createAsyncQueue, Deferred } from '@scrypted/deferred';
+import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import sdk, { ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
+import type { ChatCompletionContentPartImage } from 'openai/resources';
+import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/resources/chat/completions.mjs';
 import path from 'path';
-import { connectStreamInternal, connectStreamService, prepareTools } from './connect';
+import { createInterface } from 'readline';
+import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { CameraTools } from './tools';
 
-abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY {
+export async function prepareTools(toolIds: string[]) {
+    const toolsPromises = toolIds.map(async tool => {
+        const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
+        const availableTools = await llmTools.getLLMTools();
+        return availableTools.map(tool => {
+            tool.function.parameters ||= {
+                "type": "object",
+                "properties": {
+                },
+                "required": [
+                ],
+                "additionalProperties": false
+            };
+            return {
+                llmTools,
+                tool,
+            };
+        });
+    });
+
+    const tools = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
+    const map: Record<string, string> = {};
+    for (const entry of tools) {
+        map[entry.tool.function.name] = entry.llmTools.id;
+    }
+
+    return {
+        map,
+        tools: tools.map(t => t.tool),
+    };
+}
+
+abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
         systemPrompt: {
             title: 'System Prompt',
@@ -30,18 +65,182 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         }
     });
 
-    abstract connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
-        systemPrompt?: string,
-    }): AsyncGenerator<Buffer>;
+    abstract getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion>;
+    abstract streamChatCompletionInternal(body: ChatCompletionStreamParams): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>;
+    abstract get functionCalls(): boolean;
 
-    async connectStream(input?: AsyncGenerator<Buffer> | undefined, options?: any): Promise<AsyncGenerator<Buffer>> {
-        return this.connectStreamInternal(input!, {
-            systemPrompt: this.storageSettings.values.systemPrompt,
+    async streamChatCompletion(body: ChatCompletionStreamParams): Promise<AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>> {
+        return this.streamChatCompletionInternal(body);
+    }
+
+    async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
+        const tools = await prepareTools(this.storageSettings.values.tools);
+
+        const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => {
+            const toolId = tools.map[toolCall.function.name];
+            if (!toolId)
+                throw new Error(`Tool ${toolCall} not found.`);
+
+            const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
+            if (!tool)
+                throw new Error(`Tool ${toolCall} not found.`);
+            if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
+                throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
+            const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
+            return result;
+        }
+
+        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+
+        if (this.storageSettings.values.systemPrompt) {
+            messages.push({
+                role: 'system',
+                content: this.storageSettings.values.systemPrompt,
+            });
+        }
+
+        const i = new PassThrough();
+        const o = new PassThrough();
+        const q = createAsyncQueue<Buffer>();
+        o.on('data', (chunk) => {
+            q.submit(chunk);
         });
+
+        const rl = createInterface({
+            input: i,
+            output: o,
+            terminal: true,
+            prompt: '> ',
+        });
+        rl.prompt();
+
+        let processing = false;
+
+        (async () => {
+            try {
+                for await (const chunk of input) {
+                    // terminal message are json
+                    if (!(chunk instanceof Buffer))
+                        continue;
+                    i.push(chunk);
+                }
+            }
+            catch (e) {
+            }
+            finally {
+                i.destroy();
+                o.destroy();
+                rl.close();
+            }
+        })();
+
+        rl.on('line', async (line) => {
+            if (!line) {
+                rl.prompt();
+                return;
+            }
+            if (processing)
+                return;
+            processing = true;
+            messages.push({
+                role: 'user',
+                content: line,
+            });
+            try {
+                let printedName = false;
+
+                while (true) {
+                    let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
+                    for await (const token of await this.streamChatCompletion({
+                        messages,
+                        tools: tools.tools,
+                        model: undefined as any,
+                    })) {
+                        lastAssistantMessage = token as any;
+                        if (token.object === 'chat.completion.chunk') {
+                            if (token.choices[0].delta.content) {
+                                if (!printedName) {
+                                    printedName = true;
+                                    q.submit(Buffer.from(`\n\n${this.name}:\n\n`));
+                                }
+                                q.submit(Buffer.from(token.choices[0].delta.content));
+                            }
+                        }
+                    }
+                    q.submit(Buffer.from('\n\n'));
+                    console.log(lastAssistantMessage);
+                    const message = lastAssistantMessage!.choices[0].message!;
+                    messages.push(message);
+
+                    if (!message.tool_calls)
+                        break;
+
+                    for (const tc of message.tool_calls) {
+                        q.submit(Buffer.from(`\n\n${this.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
+                        const response = await toolCall(tc);
+                        // tool calls cant return images, so fake it out by having the tool respond
+                        // that the next user message will include the image and the assistant respond ok.
+                        if (response.startsWith('data:')) {
+                            messages.push({
+                                role: 'tool',
+                                tool_call_id: tc.id,
+                                content: 'The next user message will include the image.',
+                            });
+                            messages.push({
+                                role: 'assistant',
+                                content: 'Ok.',
+                            });
+
+                            const image: ChatCompletionContentPartImage = {
+                                type: 'image_url',
+                                image_url: {
+                                    url: response,
+                                },
+                            };
+                            messages.push({
+                                role: 'user',
+                                content: [
+                                    image,
+                                ],
+                            });
+                        }
+                        else {
+                            messages.push({
+                                role: 'tool',
+                                tool_call_id: tc.id,
+                                content: response,
+                            });
+                        }
+
+                        if (this.functionCalls) {
+                            message.function_call = {
+                                name: tc.function.name,
+                                arguments: tc.function.arguments!,
+                            }
+                        }
+                    }
+
+                    if (this.functionCalls) {
+                        delete message.tool_calls;
+                    }
+                }
+
+            }
+            finally {
+                processing = false;
+                rl.prompt();
+            }
+        });
+
+        yield* q.queue;
+    }
+
+    async connectStream(input: AsyncGenerator<Buffer>, options?: any): Promise<AsyncGenerator<Buffer>> {
+        return this.connectStreamService(input);
     }
 }
 
-class OpenAIEndpoint extends BaseLLM implements Settings {
+class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     openaiSettings = new StorageSettings(this, {
         model: {
             title: 'Model',
@@ -65,46 +264,35 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
         },
     });
 
-    async * connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
-        systemPrompt?: string,
-    }): AsyncGenerator<Buffer> {
-        const self = this;
-        const tools = await prepareTools(self.storageSettings.values.tools);
+    get functionCalls(): boolean {
+        return this.openaiSettings.values.functionCalls || false;
+    }
 
-        yield* connectStreamService(input,
-            {
-                name: this.name!,
-                systemPrompt: this.storageSettings.values.systemPrompt,
-                functionCalls: this.openaiSettings.values.functionCalls,
-            },
-            async toolCall => {
-                try {
-                    const toolId = tools.map[toolCall.function.name];
-                    if (!toolId)
-                        throw new Error(`Tool ${toolCall} not found.`);
+    async * streamChatCompletionInternal(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
+        const client = new OpenAI({
+            baseURL: this.openaiSettings.values.baseURL,
+            apiKey: this.openaiSettings.values.apiKey,
+        });
 
-                    const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
-                    if (!tool)
-                        throw new Error(`Tool ${toolCall} not found.`);
-                    if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
-                        throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
-                    const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
-                    return result;
-                }
-                catch (e) {
-                    return 'There was an error calling the tool: ' + e;
-                }
-            },
-            async function* connect(messages) {
-                yield* connectStreamInternal({
-                    baseURL: self.openaiSettings.values.baseURL,
-                    apiKey: self.openaiSettings.values.apiKey,
-                    messages,
-                    tools: tools.tools,
-                    model: self.openaiSettings.values.model,
-                });
-            }
-        );
+        body.model ||= this.openaiSettings.values.model;
+        const stream = client.chat.completions.stream(body);
+        for await (const chunk of stream) {
+            yield chunk;
+        }
+        const last = await stream.finalChatCompletion();
+        yield last;
+    }
+
+    async getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+        const client = new OpenAI({
+            baseURL: this.openaiSettings.values.baseURL,
+            apiKey: this.openaiSettings.values.apiKey,
+        });
+
+        body.model ||= this.openaiSettings.values.model;
+
+        const completion = await client.chat.completions.create(body);
+        return completion;
     }
 
     async getSettings(): Promise<Setting[]> {
@@ -209,27 +397,14 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
         }, 5000);
     });
 
-    return port.promise;
+    const p = await port.promise;
+    const address = sdk.clusterManager.getClusterAddress() || '127.0.0.1';
+    return `http://${address}:${p}/v1`;
 }
 
-async function* llamaConnect(options: {
-    name: string,
-    port: number,
-    apiKey: string,
-    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-    tools: ChatCompletionTool[],
-}) {
-    yield* connectStreamInternal({
-        baseURL: `http://127.0.0.1:${options.port}/v1`,
-        apiKey: options.apiKey,
-        messages: options.messages,
-        tools: options.tools,
-    });
-}
-
-class LlamaCPP extends BaseLLM implements OnOff {
+class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
     forked: ReturnType<typeof sdk.fork<ReturnType<typeof fork>>> | undefined;
-    llamaPort: Promise<number> | undefined;
+    llamaBaseUrl: Promise<string> | undefined;
 
     llamaSettings = new StorageSettings(this, {
         model: {
@@ -294,6 +469,10 @@ class LlamaCPP extends BaseLLM implements OnOff {
         }
     });
 
+    get functionCalls(): boolean {
+        return false;
+    }
+
     async stopLlamaServer() {
         if (this.forked) {
             try {
@@ -331,6 +510,8 @@ class LlamaCPP extends BaseLLM implements OnOff {
     }
 
     async startLlamaServer() {
+        if (!this.llamaSettings.values.apiKey)
+            this.llamaSettings.values.apiKey = Math.random().toString(16).slice(2, 10);
         if (!this.on) {
             this.stopLlamaServer();
             return;
@@ -346,7 +527,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
                 } : undefined,
                 id: this.id,
             });
-            this.llamaPort = (async () => {
+            this.llamaBaseUrl = (async () => {
                 const result = await this.forked!.result;
                 return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model);
             })();
@@ -357,64 +538,44 @@ class LlamaCPP extends BaseLLM implements OnOff {
         return this.forked!;
     }
 
-    async * connectStreamInternal(input: AsyncGenerator<Buffer>, options: {
-        systemPrompt?: string,
-    }): AsyncGenerator<Buffer> {
+    async getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion> {
         const forked = await this.startLlamaServer();
-        if (!forked) {
-            yield Buffer.from('Llama server is not running.\n');
-            return;
+        if (!forked)
+            throw new Error('Llama server is not running.\n');
+
+        await forked.result;
+        const baseURL = await this.llamaBaseUrl!;
+
+
+        const client = new OpenAI({
+            baseURL,
+            apiKey: this.llamaSettings.values.apiKey || 'no-key',
+        });
+
+        const completion = await client.chat.completions.create(body);
+        return completion;
+    }
+
+    async * streamChatCompletionInternal(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
+        const forked = await this.startLlamaServer();
+        if (!forked)
+            throw new Error('Llama server is not running.\n');
+
+        await forked.result;
+        const baseURL = await this.llamaBaseUrl!;
+
+
+        const client = new OpenAI({
+            baseURL,
+            apiKey: this.llamaSettings.values.apiKey || 'no-key',
+        });
+
+        const stream = client.chat.completions.stream(body);
+        for await (const chunk of stream) {
+            yield chunk;
         }
-
-        const result = await forked.result;
-        const port = await this.llamaPort!;
-        this.console.log('port', port);
-
-        const self = this;
-
-        const tools = await prepareTools(self.storageSettings.values.tools);
-
-        const connect = connectStreamService(input,
-            {
-                name: this.name!,
-                systemPrompt: this.storageSettings.values.systemPrompt,
-                functionCalls: false,
-            },
-            async toolCall => {
-                try {
-                    const toolId = tools.map[toolCall.function.name];
-                    if (!toolId)
-                        throw new Error(`Tool ${toolCall} not found.`);
-
-                    const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
-                    if (!tool)
-                        throw new Error(`Tool ${toolCall} not found.`);
-                    if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
-                        throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
-                    const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
-                    return result;
-                }
-                catch (e) {
-                    return 'There was an error calling the tool: ' + e;
-                }
-            },
-            async function* connect(messages) {
-
-                const connect = await result.llamaConnect({
-                    messages,
-                    name: self.name!,
-                    port: port,
-                    apiKey: self.llamaSettings.values.apiKey,
-                    tools: tools.tools,
-                });
-                for await (const chunk of connect) {
-                    yield chunk;
-                }
-            }
-        );
-
-
-        yield* connect;
+        const last = await stream.finalChatCompletion();
+        yield last;
     }
 }
 
@@ -568,15 +729,6 @@ export default LLMPlugin;
 export async function fork() {
     return {
         llamaFork,
-        async llamaConnect(options: {
-            name: string,
-            port: number,
-            apiKey: string,
-            messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-            tools: ChatCompletionTool[],
-        }) {
-            return llamaConnect(options);
-        },
         async terminate() {
             process.exit(0);
         }
