@@ -121,7 +121,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings {
     }
 }
 
-async function llamaFork(model: string) {
+async function llamaFork(providedPort: number, apiKey: string, model: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
         await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => { });
@@ -134,13 +134,22 @@ async function llamaFork(model: string) {
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
     const llamaBinary = await downloadLLama();
 
+    const host = apiKey ? '0.0.0.0' : '127.0.0.1';
+    providedPort ||= 0;
+
+    const args = [
+        '-hf', model,
+        '-ngl', '999',
+        '--host', host,
+        '--port', providedPort.toString(),
+        '--jinja',
+    ];
+
+    if (apiKey)
+        args.push('--api-key', apiKey)
+
     const cp = child_process.spawn(llamaBinary,
-        [
-            '-hf', model,
-            '-ngl', '999',
-            '--port', '0',
-            '--jinja',
-        ],
+        args,
         {
             stdio: ['pipe', 'pipe', 'pipe'],
             cwd: path.dirname(llamaBinary),
@@ -261,6 +270,24 @@ class LlamaCPP extends BaseLLM implements OnOff {
                     hide: !sdk.clusterManager?.getClusterMode(),
                 }
             },
+        },
+        apiKey: {
+            group: 'Network',
+            title: 'API Key',
+            type: 'password',
+            description: 'Provide an API Key will allow llama.cpp to be usable by other services on your network that have the entered credentials.',
+            onPut: () => {
+                this.stopLlamaServer();
+            },
+        },
+        port: {
+            group: 'Network',
+            title: 'Port',
+            type: 'number',
+            description: 'The port to run the llama server on. If not specified, a random port will be used.',
+            onPut: () => {
+                this.stopLlamaServer();
+            },
         }
     });
 
@@ -318,7 +345,7 @@ class LlamaCPP extends BaseLLM implements OnOff {
             });
             this.llamaPort = (async () => {
                 const result = await this.forked!.result;
-                return result.llamaFork(this.llamaSettings.values.model);
+                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model);
             })();
             this.forked.worker.on('exit', () => {
                 this.forked = undefined;
@@ -527,7 +554,6 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         if (nativeId?.startsWith('llama-')) {
             const llama = new LlamaCPP(nativeId);
             this.devices.set(nativeId, llama);
-            llama.startLlamaServer();
             return llama;
         }
     }

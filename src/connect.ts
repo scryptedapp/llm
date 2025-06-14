@@ -118,7 +118,7 @@ export async function* connectStreamService(input: AsyncGenerator<Buffer>, optio
                         break;
 
                     for (const tc of message.tool_calls) {
-                        yield Buffer.from(`\n\n> Calling tool: ${tc.function.name}\n\n`);
+                        yield Buffer.from(`\n\n>${options.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`);
                         const response = await toolcall(tc);
                         // tool calls cant return images, so fake it out by having the tool respond
                         // that the next user message will include the image and the assistant respond ok.
