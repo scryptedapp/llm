@@ -1,5 +1,17 @@
 {
    "name": "@scrypted/llm",
+      "keywords": [
+      "scrypted",
+      "plugin",
+      "llama.cpp",
+      "llama",
+      "llm",
+      "vision",
+      "chat",
+      "openai",
+      "claude",
+      "gemma"
+   ],
    "scripts": {
       "scrypted-setup-project": "scrypted-setup-project",
       "prescrypted-setup-project": "scrypted-package-json",
