@@ -596,35 +596,30 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         });
     }
 
+    async reportDevice(nativeId: ScryptedNativeId, name: string) {
+return await sdk.deviceManager.onDeviceDiscovered({
+                name,
+                type: 'LLM',
+                nativeId,
+                interfaces: [
+                    ScryptedInterface.ChatCompletion,
+                    ScryptedInterface.TTY,
+                    ScryptedInterface.StreamService,
+                    ScryptedInterface.Settings,
+                ]
+            });
+    }
+
     async createDevice(settings: DeviceCreatorSettings): Promise<string> {
         const randomHex = Math.random().toString(16).slice(2, 10);
         if (!settings.type)
             throw new Error('Type is required to create a device.');
-        if (settings.type === 'OpenAI Compatible Endpoint') {
-            return await sdk.deviceManager.onDeviceDiscovered({
-                name: settings.name as string,
-                type: 'LLM',
-                nativeId: 'openai-' + randomHex,
-                interfaces: [
-                    ScryptedInterface.TTY,
-                    ScryptedInterface.StreamService,
-                    ScryptedInterface.Settings,
-                ]
-            });
+        if (settings.type === 'OpenAI Endpoint') {
+            return await this.reportDevice('openai-' + randomHex, settings.name as string);
         }
         else if (settings.type === 'llama.cpp') {
             const nativeId = 'llama-' + randomHex;
-            const id = await sdk.deviceManager.onDeviceDiscovered({
-                name: settings.name as string,
-                type: 'LLM',
-                nativeId,
-                interfaces: [
-                    ScryptedInterface.TTY,
-                    ScryptedInterface.StreamService,
-                    ScryptedInterface.Settings,
-                    ScryptedInterface.OnOff,
-                ]
-            });
+            const id = await this.reportDevice(nativeId, settings.name as string);
             const device = await this.getDevice(nativeId) as LlamaCPP;
             device.on = true;
             return id;
@@ -714,12 +709,14 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         if (nativeId?.startsWith('openai-')) {
             found = new OpenAIEndpoint(nativeId);
             this.devices.set(nativeId, found);
+            this.reportDevice(nativeId, found.name!);
             return found;
         }
         if (nativeId?.startsWith('llama-')) {
-            const llama = new LlamaCPP(nativeId);
-            this.devices.set(nativeId, llama);
-            return llama;
+            found = new LlamaCPP(nativeId);
+            this.devices.set(nativeId, found);
+            this.reportDevice(nativeId, found.name!);
+            return found;
         }
     }
 }
