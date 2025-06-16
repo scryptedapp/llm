@@ -608,17 +608,21 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     }
 
     async reportDevice(nativeId: ScryptedNativeId, name: string) {
-return await sdk.deviceManager.onDeviceDiscovered({
-                name,
-                type: 'LLM',
-                nativeId,
-                interfaces: [
-                    ScryptedInterface.ChatCompletion,
-                    ScryptedInterface.TTY,
-                    ScryptedInterface.StreamService,
-                    ScryptedInterface.Settings,
-                ]
-            });
+        const interfaces = [
+            ScryptedInterface.ChatCompletion,
+            ScryptedInterface.TTY,
+            ScryptedInterface.StreamService,
+            ScryptedInterface.Settings,
+        ];
+        if (nativeId?.startsWith('llama-'))
+            interfaces.push(ScryptedInterface.OnOff);
+
+        return await sdk.deviceManager.onDeviceDiscovered({
+            name,
+            type: 'LLM',
+            nativeId,
+            interfaces,
+        });
     }
 
     async createDevice(settings: DeviceCreatorSettings): Promise<string> {
