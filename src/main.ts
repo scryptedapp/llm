@@ -224,7 +224,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         delete message.tool_calls;
                     }
                 }
-
+            }
+            catch (e) {
+                q.submit(Buffer.from(`\n\nChat error (restarting):\n\n${e}\n\n`));
+                return;
             }
             finally {
                 processing = false;
@@ -249,8 +252,16 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
         },
         baseURL: {
             title: 'Base URL',
-            description: 'The base URL of the OpenAI compatible endpoint.',
+            description: 'The base URL of the OpenAI compatible endpoint. Common base URLs for cloud providers and local LLM servers are provided as examples.',
             placeholder: 'https://api.openai.com/v1',
+            combobox: true,
+            choices: [
+                'https://api.openai.com/v1',
+                'https://generativelanguage.googleapis.com/v1beta/openai/',
+                'https://api.anthropic.com/v1/',
+                'http://llama-cpp.localdomain:8080/v1',
+                'http://lmstudio.localdomain:1234/v1',
+            ]
         },
         apiKey: {
             title: 'API Key',
@@ -271,7 +282,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     async * streamChatCompletionInternal(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
         const client = new OpenAI({
             baseURL: this.openaiSettings.values.baseURL,
-            apiKey: this.openaiSettings.values.apiKey,
+            apiKey: this.openaiSettings.values.apiKey || 'no-key',
         });
 
         body.model ||= this.openaiSettings.values.model;
@@ -286,7 +297,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     async getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion> {
         const client = new OpenAI({
             baseURL: this.openaiSettings.values.baseURL,
-            apiKey: this.openaiSettings.values.apiKey,
+            apiKey: this.openaiSettings.values.apiKey || 'no-key',
         });
 
         body.model ||= this.openaiSettings.values.model;
