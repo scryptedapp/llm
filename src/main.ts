@@ -1,5 +1,5 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import sdk, { ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
@@ -11,39 +11,8 @@ import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
+import { handleToolCalls, prepareTools } from './tool-calls';
 import { CameraTools } from './tools';
-
-export async function prepareTools(toolIds: string[]) {
-    const toolsPromises = toolIds.map(async tool => {
-        const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
-        const availableTools = await llmTools.getLLMTools();
-        return availableTools.map(tool => {
-            tool.function.parameters ||= {
-                "type": "object",
-                "properties": {
-                },
-                "required": [
-                ],
-                "additionalProperties": false
-            };
-            return {
-                llmTools,
-                tool,
-            };
-        });
-    });
-
-    const tools = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
-    const map: Record<string, string> = {};
-    for (const entry of tools) {
-        map[entry.tool.function.name] = entry.llmTools.id;
-    }
-
-    return {
-        map,
-        tools: tools.map(t => t.tool),
-    };
-}
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
@@ -108,21 +77,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
-        const tools = await prepareTools(this.storageSettings.values.tools);
-
-        const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => {
-            const toolId = tools.map[toolCall.function.name];
-            if (!toolId)
-                throw new Error(`Tool ${toolCall} not found.`);
-
-            const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
-            if (!tool)
-                throw new Error(`Tool ${toolCall} not found.`);
-            if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
-                throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
-            const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
-            return result;
-        }
+        const tools = await prepareTools(sdk, this.storageSettings.values.tools);
 
         const i = new PassThrough();
         const o = new PassThrough();
@@ -195,56 +150,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         rl.prompt();
                         continue;
                     }
-                    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
-                    for (const tc of message.tool_calls) {
+                    const messages = await handleToolCalls(tools, message, this.functionCalls, tc => {
                         q.submit(Buffer.from(`\n\n${this.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
-                        const response = await toolCall(tc);
-                        // tool calls cant return images, so fake it out by having the tool respond
-                        // that the next user message will include the image and the assistant respond ok.
-                        if (response.startsWith('data:')) {
-                            messages.push({
-                                role: 'tool',
-                                tool_call_id: tc.id,
-                                content: 'The next user message will include the image.',
-                            });
-                            messages.push({
-                                role: 'assistant',
-                                content: 'Ok.',
-                            });
-
-                            const image: ChatCompletionContentPartImage = {
-                                type: 'image_url',
-                                image_url: {
-                                    url: response,
-                                },
-                            };
-                            messages.push({
-                                role: 'user',
-                                content: [
-                                    image,
-                                ],
-                            });
-                        }
-                        else {
-                            messages.push({
-                                role: 'tool',
-                                tool_call_id: tc.id,
-                                content: response,
-                            });
-                        }
-
-                        if (this.functionCalls) {
-                            message.function_call = {
-                                name: tc.function.name,
-                                arguments: tc.function.arguments!,
-                            }
-                        }
-                    }
-
-                    if (this.functionCalls) {
-                        delete message.tool_calls;
-                    }
+                    });
 
                     userMessageQueue.submit(messages);
                 }
