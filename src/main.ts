@@ -160,10 +160,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         })();
 
         using userMessageQueue = createAsyncQueue<ChatCompletionMessageParam[]>();
+        let printedName = false;
 
         (async () => {
             try {
-                let printedName = false;
 
                 let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
                 for await (const token of await this.streamChatCompletion({
@@ -263,6 +263,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             if (processing)
                 return;
             processing = true;
+            printedName = false;
             userMessageQueue.submit([{
                 role: 'user',
                 content: line,
