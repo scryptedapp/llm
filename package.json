@@ -35,16 +35,16 @@
       ]
    },
    "dependencies": {
-      "@scrypted/deferred": "^0.0.5",
-      "@scrypted/sdk": "^0.5.17",
+      "@scrypted/deferred": "^0.0.8",
+      "@scrypted/sdk": "^0.5.24",
       "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",
-      "openai": "^5.3.0"
+      "openai": "^5.8.2"
    },
    "devDependencies": {
       "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
-      "@types/node": "^24.0.1"
+      "@types/node": "^22.15.3"
    },
-   "version": "0.0.14"
+   "version": "0.0.15"
 }

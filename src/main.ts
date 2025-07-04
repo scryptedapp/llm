@@ -5,8 +5,8 @@ import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
-import type { ChatCompletionContentPartImage } from 'openai/resources';
-import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/resources/chat/completions.mjs';
+import type { ChatCompletionContentPartImage, ChatCompletionMessageParam } from 'openai/resources';
+import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/resources/chat/completions';
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
@@ -69,8 +69,42 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     abstract streamChatCompletionInternal(body: ChatCompletionStreamParams): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>;
     abstract get functionCalls(): boolean;
 
-    async streamChatCompletion(body: ChatCompletionStreamParams): Promise<AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>> {
-        return this.streamChatCompletionInternal(body);
+    async * streamChatCompletionWrapper(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
+        const lastMessage = body.messages[body.messages.length - 1];
+        if (lastMessage?.role !== 'user') {
+            if (!userMessages)
+                throw new Error('Last message must be from the user.');
+            const userMessage = await userMessages.next();
+            if (userMessage.done)
+                throw new Error('No user message provided for last message.');
+            body.messages.push(...userMessage.value);
+        }
+
+        while (true) {
+            for await (const message of this.streamChatCompletionInternal(body)) {
+                yield message;
+                if ('delta' in message.choices[0]) {
+                    // this is a streaming chunk, yield it.
+                    continue;
+                }
+                body.messages.push(message.choices[0].message);
+            }
+
+            // need user message
+            if (!userMessages)
+                return;
+
+            const userMessage = await userMessages.next();
+            if (userMessage.done)
+                break;
+            body.messages.push(...userMessage.value);
+            if (body.messages[body.messages.length - 1].role === 'assistant')
+                throw new Error('Last message must be from the user or a tool.');
+        }
+    }
+
+    async streamChatCompletion(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>): Promise<AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>> {
+        return this.streamChatCompletionWrapper(body, userMessages);
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
@@ -88,15 +122,6 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
             const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
             return result;
-        }
-
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-
-        if (this.storageSettings.values.systemPrompt) {
-            messages.push({
-                role: 'system',
-                content: this.storageSettings.values.systemPrompt,
-            });
         }
 
         const i = new PassThrough();
@@ -134,46 +159,43 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             }
         })();
 
-        rl.on('line', async (line) => {
-            if (!line) {
-                rl.prompt();
-                return;
-            }
-            if (processing)
-                return;
-            processing = true;
-            messages.push({
-                role: 'user',
-                content: line,
-            });
+        using userMessageQueue = createAsyncQueue<ChatCompletionMessageParam[]>();
+
+        (async () => {
             try {
                 let printedName = false;
 
-                while (true) {
-                    let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
-                    for await (const token of await this.streamChatCompletion({
-                        messages,
-                        tools: tools.tools,
-                        model: undefined as any,
-                    })) {
-                        lastAssistantMessage = token as any;
-                        if (token.object === 'chat.completion.chunk') {
-                            if (token.choices[0].delta.content) {
-                                if (!printedName) {
-                                    printedName = true;
-                                    q.submit(Buffer.from(`\n\n${this.name}:\n\n`));
-                                }
-                                q.submit(Buffer.from(token.choices[0].delta.content));
+                let lastAssistantMessage: ParsedChatCompletion<null> | undefined;
+                for await (const token of await this.streamChatCompletion({
+                    messages: this.storageSettings.values.systemPrompt ? [{
+                        role: 'system',
+                        content: this.storageSettings.values.systemPrompt,
+                    }] : [],
+                    tools: tools.tools,
+                    model: undefined as any,
+                }, userMessageQueue.queue)) {
+                    lastAssistantMessage = token as any;
+                    if (token.object === 'chat.completion.chunk') {
+                        if (token.choices[0].delta.content) {
+                            if (!printedName) {
+                                printedName = true;
+                                q.submit(Buffer.from(`\n\n${this.name}:\n\n`));
                             }
+                            q.submit(Buffer.from(token.choices[0].delta.content));
                         }
+                        continue;
                     }
+
                     q.submit(Buffer.from('\n\n'));
                     console.log(lastAssistantMessage);
                     const message = lastAssistantMessage!.choices[0].message!;
-                    messages.push(message);
 
-                    if (!message.tool_calls)
-                        break;
+                    if (!message.tool_calls) {
+                        processing = false;
+                        rl.prompt();
+                        continue;
+                    }
+                    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
                     for (const tc of message.tool_calls) {
                         q.submit(Buffer.from(`\n\n${this.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
@@ -223,16 +245,28 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                     if (this.functionCalls) {
                         delete message.tool_calls;
                     }
+
+                    userMessageQueue.submit(messages);
                 }
             }
             catch (e) {
                 q.submit(Buffer.from(`\n\nChat error (restarting):\n\n${e}\n\n`));
                 return;
             }
-            finally {
-                processing = false;
+        })();
+
+        rl.on('line', async (line) => {
+            if (!line) {
                 rl.prompt();
+                return;
             }
+            if (processing)
+                return;
+            processing = true;
+            userMessageQueue.submit([{
+                role: 'user',
+                content: line,
+            }]);
         });
 
         yield* q.queue;
@@ -360,14 +394,13 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
         }
     );
 
-    // When parent exits, kill the child
-    process.on('exit', () => {
-        cp.kill();
-    });
-
-    process.on('SIGINT', () => {
+    const cpKill = () => {
         cp.kill();
         process.exit();
+    };
+    // When parent exits, kill the child
+    ['exit', 'SIGINT', 'SIGTERM', 'SIGHUP', 'SIGUSR1', 'SIGUSR2'].forEach((signal) => {
+        process.on(signal, cpKill);
     });
 
     const port = new Deferred<number>();
