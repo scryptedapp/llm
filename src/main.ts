@@ -51,12 +51,20 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
 
         while (true) {
             for await (const message of this.streamChatCompletionInternal(body)) {
-                yield message;
                 if ('delta' in message.choices[0]) {
                     // this is a streaming chunk, yield it.
+                    yield message;
                     continue;
                 }
+
                 body.messages.push(message.choices[0].message);
+                // vllm freaks out if arguments is an empty string.
+                for (const tc of message.choices[0].message.tool_calls || []) {
+                    if (tc.function)
+                        tc.function.arguments ||= '{}';
+                }
+
+                yield message;
             }
 
             // need user message

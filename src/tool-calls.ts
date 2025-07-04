@@ -41,7 +41,7 @@ export async function prepareTools(sdk: ScryptedStatic, toolIds: string[]) {
             throw new Error(`Tool ${toolCall} not found.`);
         if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
             throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
-        const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'));
+        const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
         return result;
     }
 
@@ -107,6 +107,8 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
     if (assistantUsesFunctionCalls) {
         delete message.tool_calls;
     }
+
+    message.function_call = null;
 
     return messages;
 }
