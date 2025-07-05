@@ -37,12 +37,12 @@
    "dependencies": {
       "@scrypted/deferred": "^0.0.8",
       "@scrypted/sdk": "^0.5.24",
+      "@scrypted/types": "^0.5.23",
       "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",
       "openai": "^5.8.2"
    },
    "devDependencies": {
-      "@scrypted/types": "^0.5.23",
       "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
       "@types/node": "^22.15.3"
