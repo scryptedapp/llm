@@ -40,9 +40,9 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
 
     async * streamChatCompletionWrapper(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
         const lastMessage = body.messages[body.messages.length - 1];
-        if (lastMessage?.role !== 'user') {
+        if (lastMessage?.role === 'assistant') {
             if (!userMessages)
-                throw new Error('Last message must be from the user.');
+                throw new Error('Last message must not be from the assistant.');
             const userMessage = await userMessages.next();
             if (userMessage.done)
                 throw new Error('No user message provided for last message.');
