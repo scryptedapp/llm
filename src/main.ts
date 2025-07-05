@@ -38,9 +38,9 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     abstract streamChatCompletionInternal(body: ChatCompletionStreamParams): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>;
     abstract get functionCalls(): boolean;
 
-    async * streamChatCompletionWrapper(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
+    async * streamChatCompletionWrapper(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>, callback?: null | ((chunk: OpenAI.ChatCompletionChunk) => Promise<boolean>)): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
         const lastMessage = body.messages[body.messages.length - 1];
-        if (lastMessage?.role === 'assistant') {
+        if (lastMessage?.role !== 'user' && lastMessage?.role !== 'tool') {
             if (!userMessages)
                 throw new Error('Last message must not be from the assistant.');
             const userMessage = await userMessages.next();
@@ -49,11 +49,20 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             body.messages.push(...userMessage.value);
         }
 
+        let error: Error | undefined;
+        let done = false;
         while (true) {
             for await (const message of this.streamChatCompletionInternal(body)) {
+                if (done)
+                    return;
+                if (error)
+                    throw error;
                 if ('delta' in message.choices[0]) {
                     // this is a streaming chunk, yield it.
-                    yield message;
+                    if (callback)
+                        callback(message as OpenAI.ChatCompletionChunk).then(more => done = !more).catch(e => error = e);
+                    else if (callback !== null)
+                        yield message;
                     continue;
                 }
 
@@ -80,8 +89,8 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         }
     }
 
-    async streamChatCompletion(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>): Promise<AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>> {
-        return this.streamChatCompletionWrapper(body, userMessages);
+    async streamChatCompletion(body: ChatCompletionStreamParams, userMessages?: undefined | AsyncGenerator<ChatCompletionMessageParam[]>, callback?: null | ((chunk: OpenAI.ChatCompletionChunk) => Promise<boolean>)): Promise<any> {
+        return this.streamChatCompletionWrapper(body, userMessages, callback);
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
