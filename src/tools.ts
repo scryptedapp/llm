@@ -15,7 +15,7 @@ export class CameraTools extends ScryptedDeviceBase implements LLMTools {
                 type: 'function',
                 function: {
                     name: 'take-picture',
-                    description: 'Takes a picture on a given camera and provides the response as base64 encoded jpeg.',
+                    description: 'Get an image from the requested camera to present it to a user answer or use it to answer a user query. The picture will be returned as a base64 encoded JPEG image.',
                     parameters: {
                         "type": "object",
                         "properties": {
