@@ -5,13 +5,6 @@ export class CameraTools extends ScryptedDeviceBase implements LLMTools {
     async getLLMTools(): Promise<ChatCompletionTool[]> {
         const listCameras = this.listCameras();
         return [
-            // {
-            //     type: 'function',
-            //     function: {
-            //         name: 'list-cameras',
-            //         description: `List the cameras available to view. The current camera list is:\n${listCameras}`,
-            //     },
-            // },
             {
                 type: 'function',
                 function: {
@@ -45,10 +38,6 @@ export class CameraTools extends ScryptedDeviceBase implements LLMTools {
     }
 
     async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
-        if (name === 'list-cameras') {
-            return this.listCameras();
-        }
-
         if (name === 'take-picture') {
             const cameraName = parameters.camera;
             if (!cameraName)
@@ -67,14 +56,9 @@ export class CameraTools extends ScryptedDeviceBase implements LLMTools {
 export class LightTools extends ScryptedDeviceBase implements LLMTools {
     async getLLMTools(): Promise<ChatCompletionTool[]> {
         const listLights = this.listLights();
+        const listFans = this.listFans();
         return [
-            // {
-            //     type: 'function',
-            //     function: {
-            //         name: 'list-lights',
-            //         description: `List the lights available to control. The current light list is:\n${listLights}`,
-            //     },
-            // },
+
             {
                 type: 'function',
                 function: {
@@ -140,6 +124,47 @@ export class LightTools extends ScryptedDeviceBase implements LLMTools {
                     },
                 },
             },
+
+            {
+                type: 'function',
+                function: {
+                    name: 'turn-fan-on',
+                    description: `Turn on the requested fan. The fan list is:\n${listFans}`,
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "fan": {
+                                "type": "string",
+                                "description": "The name of the fan to turn on.",
+                            },
+                        },
+                        "required": [
+                            "fan",
+                        ],
+                        "additionalProperties": false
+                    },
+                },
+            },
+            {
+                type: 'function',
+                function: {
+                    name: 'turn-fan-off',
+                    description: 'Turn off the requested fan.',
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "fan": {
+                                "type": "string",
+                                "description": "The name of the fan to turn off.",
+                            },
+                        },
+                        "required": [
+                            "fan",
+                        ],
+                        "additionalProperties": false
+                    },
+                },
+            },
         ];
     }
 
@@ -158,10 +183,6 @@ export class LightTools extends ScryptedDeviceBase implements LLMTools {
     }
 
     async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
-        if (name === 'list-lights') {
-            return this.listLights();
-        }
-
         if (name === 'turn-light-on' || name === 'turn-light-off') {
             const lightName = parameters.light;
             if (!lightName)
@@ -180,6 +201,24 @@ export class LightTools extends ScryptedDeviceBase implements LLMTools {
                 return `${lightName} turned off.`;
             }
         }
+        else if (name === 'turn-fan-on' || name === 'turn-fan-off') {
+            const fanName = parameters.fan;
+            if (!fanName)
+                return `"fan" parameter is required for ${name} tool. Valid fan names are: ${this.listFans()}`;
+            const fan = sdk.systemManager.getDeviceByName<OnOff>(fanName);
+            if (!fan)
+                return `${fanName} is not a valid fan. Valid fan names are: ${this.listFans()}`;
+            if (!fan.interfaces.includes(ScryptedInterface.OnOff))
+                return `${fanName} does not support on/off control.`;
+            if (name === 'turn-fan-on') {
+                await fan.turnOn();
+                return `${fanName} turned on.`;
+            }
+            else if (name === 'turn-fan-off') {
+                await fan.turnOff();
+                return `${fanName} turned off.`;
+            }
+        }
         else if (name === 'set-light-brightness') {
             const lightName = parameters.light;
             const brightness = parameters.brightness;
@@ -195,4 +234,15 @@ export class LightTools extends ScryptedDeviceBase implements LLMTools {
         }
         return 'Unknown tool: ' + name;
     }
+
+
+    listFans() {
+        const ids = Object.keys(sdk.systemManager.getSystemState());
+        const fanIds = ids.filter(id => {
+            const device = sdk.systemManager.getDeviceById(id);
+            return device.interfaces.includes(ScryptedInterface.OnOff) && device.type === ScryptedDeviceType.Fan;
+        });
+        return fanIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
+    }
+
 }

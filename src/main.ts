@@ -12,7 +12,7 @@ import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
-import { CameraTools, LightTools } from './tools';
+import { CameraTools, LightTools as SwitchTools } from './tools';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
@@ -556,6 +556,10 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     constructor(nativeId?: string) {
         super(nativeId);
 
+        // legacy
+        if (sdk.deviceManager.getNativeIds().includes('tools'))
+            sdk.deviceManager.onDeviceRemoved('tools');
+
         sdk.deviceManager.onDeviceDiscovered({
             nativeId: 'camera-tools',
             name: 'Camera Tools',
@@ -566,13 +570,9 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             ],
         });
 
-        // legacy
-        if (sdk.deviceManager.getNativeIds().includes('tools'))
-            sdk.deviceManager.onDeviceRemoved('tools');
-
         sdk.deviceManager.onDeviceDiscovered({
-            nativeId: 'light-tools',
-            name: 'Light Tools',
+            nativeId: 'switch-tools',
+            name: 'Switch Tools',
             type: ScryptedDeviceType.API,
             interfaces: [
                 ScryptedInterface.Settings,
@@ -690,8 +690,8 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     async getDevice(nativeId: ScryptedNativeId): Promise<any> {
         if (nativeId === 'camera-tools')
             return new CameraTools(nativeId);
-        if (nativeId === 'light-tools')
-            return new LightTools(nativeId);
+        if (nativeId === 'switch-tools')
+            return new SwitchTools(nativeId);
 
         let found = this.devices.get(nativeId);
         if (found)
