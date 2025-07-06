@@ -1,6 +1,5 @@
-import type { Brightness, ChatCompletionTool, LLMTools, OnOff, ScryptedStatic, Camera } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionTool, LLMTools, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
-import { ChatCompletion } from "openai/resources";
 
 export class ScryptedTools implements LLMTools {
     constructor(public sdk: ScryptedStatic) {
