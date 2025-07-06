@@ -178,7 +178,7 @@ export class LightTools extends ScryptedDeviceBase implements LLMTools {
             const device = sdk.systemManager.getDeviceById(id);
             if (!device.interfaces.includes(ScryptedInterface.Brightness))
                 return sdk.systemManager.getDeviceById(id).name
-            return `${sdk.systemManager.getDeviceById(id).name} (brightness control available)`;
+            return `${sdk.systemManager.getDeviceById(id).name}\n  - brightness control available`;
         }).join('\n');
     }
 
