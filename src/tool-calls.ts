@@ -1,11 +1,10 @@
-import { ScryptedInterface, type LLMTools, type ScryptedStatic } from "@scrypted/types";
+import type { LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage } from 'openai/resources';
 import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 
-export async function prepareTools(sdk: ScryptedStatic, toolIds: string[]) {
-    const toolsPromises = toolIds.map(async tool => {
-        const llmTools = sdk.systemManager.getDeviceById<LLMTools>(tool);
+export async function prepareTools(allLLMTools: LLMTools[]) {
+    const toolsPromises = allLLMTools.map(async llmTools => {
         const availableTools = await llmTools.getLLMTools();
         return availableTools.map(tool => {
             tool.function.parameters ||= {
@@ -24,30 +23,23 @@ export async function prepareTools(sdk: ScryptedStatic, toolIds: string[]) {
     });
 
     const toolTuples = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
-    const map: Record<string, string> = {};
+    const map: Record<string, LLMTools> = {};
     for (const entry of toolTuples) {
-        map[entry.tool.function.name] = entry.llmTools.id;
+        map[entry.tool.function.name] = entry.llmTools;
     }
 
     const tools = toolTuples.map(t => t.tool);
 
     const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => {
-        const toolId = map[toolCall.function.name];
-        if (!toolId)
-            throw new Error(`Tool ${toolCall} not found.`);
-
-        const tool = sdk.systemManager.getDeviceById<LLMTools>(toolId);
+        const tool = map[toolCall.function.name];
         if (!tool)
             throw new Error(`Tool ${toolCall} not found.`);
-        if (!tool.interfaces.includes(ScryptedInterface.LLMTools))
-            throw new Error(`Tool ${toolCall} does not implement LLMTools interface.`);
         const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
         return result;
     }
 
 
     return {
-        map,
         tools,
         toolCall,
     };

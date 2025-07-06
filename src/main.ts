@@ -1,18 +1,18 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
-import sdk, { ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface } from '@scrypted/sdk';
+import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import sdk, { ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
-import type { ChatCompletionContentPartImage, ChatCompletionMessageParam } from 'openai/resources';
+import type { ChatCompletionMessageParam } from 'openai/resources';
 import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/resources/chat/completions';
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
-import { CameraTools, LightTools as SwitchTools } from './tools';
+import { ScryptedTools } from './tools';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
@@ -22,15 +22,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             type: 'textarea',
             placeholder: 'You are a helpful assistant.',
         },
-        tools: {
-            title: 'Tools',
-            description: 'The tools available to this LLM.',
-            type: 'device',
-            deviceFilter: ({ interfaces, ScryptedInterface }) => {
-                return interfaces.includes("LLMTools");
-            },
-            multiple: true,
-            defaultValue: [],
+        terminalTools: {
+            title: 'Terminal Tools',
+            description: 'Enable terminal tools for the assistant. This allows the assistant to execute commands on the system. The LLM and users that have access to this LLM will be able to view cameras and operate all home automation devices.',
+            type: 'boolean',
         }
     });
 
@@ -94,7 +89,8 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
-        const tools = await prepareTools(sdk, this.storageSettings.values.tools);
+        const llmTools = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk)] : [];
+        const tools = await prepareTools(llmTools);
 
         const i = new PassThrough();
         const o = new PassThrough();
@@ -559,26 +555,10 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         // legacy
         if (sdk.deviceManager.getNativeIds().includes('tools'))
             sdk.deviceManager.onDeviceRemoved('tools');
-
-        sdk.deviceManager.onDeviceDiscovered({
-            nativeId: 'camera-tools',
-            name: 'Camera Tools',
-            type: ScryptedDeviceType.API,
-            interfaces: [
-                ScryptedInterface.Settings,
-                ScryptedInterface.LLMTools,
-            ],
-        });
-
-        sdk.deviceManager.onDeviceDiscovered({
-            nativeId: 'switch-tools',
-            name: 'Switch Tools',
-            type: ScryptedDeviceType.API,
-            interfaces: [
-                ScryptedInterface.Settings,
-                ScryptedInterface.LLMTools,
-            ],
-        });
+        if (sdk.deviceManager.getNativeIds().includes('switch-tools'))
+            sdk.deviceManager.onDeviceRemoved('switch-tools');
+        if (sdk.deviceManager.getNativeIds().includes('camera-tools'))
+            sdk.deviceManager.onDeviceRemoved('camera-tools');
     }
 
     async reportDevice(nativeId: ScryptedNativeId, name: string) {
@@ -688,11 +668,6 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     }
 
     async getDevice(nativeId: ScryptedNativeId): Promise<any> {
-        if (nativeId === 'camera-tools')
-            return new CameraTools(nativeId);
-        if (nativeId === 'switch-tools')
-            return new SwitchTools(nativeId);
-
         let found = this.devices.get(nativeId);
         if (found)
             return found;
