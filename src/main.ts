@@ -278,7 +278,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     }
 }
 
-async function llamaFork(providedPort: number, apiKey: string, model: string) {
+async function llamaFork(providedPort: number, apiKey: string, model: string, additionalArguments: string[]) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
         await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => { });
@@ -296,14 +296,15 @@ async function llamaFork(providedPort: number, apiKey: string, model: string) {
 
     const args = [
         '-hf', model,
-        '-ngl', '999',
         '--host', host,
         '--port', providedPort.toString(),
-        '--jinja',
+        ...additionalArguments.map(arg => arg.split(' ')).flat().map(arg => arg.trim()).filter(arg => arg),
     ];
 
     if (apiKey)
         args.push('--api-key', apiKey);
+
+    console.log('Starting llama server with args:', ...args);
 
     const cp = child_process.spawn(llamaBinary,
         args,
@@ -379,6 +380,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
             placeholder: 'unsloth/gemma-3-4b-it-GGUF',
             defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
+            combobox: true,
             choices: [
                 'unsloth/gemma-3-4b-it-GGUF',
                 'unsloth/gemma-3-12b-it-GGUF',
@@ -390,6 +392,24 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             onPut: () => {
                 this.stopLlamaServer();
             }
+        },
+        additionalArguments: {
+            title: 'Additional Arguments',
+            description: 'Additional arguments to pass to the llama server. Vision models require the --jinja argument. Language only models may not work correctly with --jinja.',
+            type: 'string',
+            multiple: true,
+            combobox: true,
+            defaultValue: [
+                '-ngl 999',
+                '--jinja',
+            ],
+            choices: [
+                '-ngl 999',
+                '--jinja',
+            ],
+            onPut: () => {
+                this.stopLlamaServer();
+            },
         },
         clusterWorkerLabels: {
             title: 'Cluster Worker Labels',
@@ -496,7 +516,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             });
             this.llamaBaseUrl = (async () => {
                 const result = await this.forked!.result;
-                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model);
+                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model, this.llamaSettings.values.additionalArguments);
             })();
             this.forked.worker.on('exit', () => {
                 this.forked = undefined;
@@ -628,6 +648,7 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
                 radioGroups: [
                     'llama.cpp',
                 ],
+                combobox: true,
                 choices: [
                     'unsloth/gemma-3-4b-it-GGUF',
                     'unsloth/gemma-3-12b-it-GGUF',

@@ -47,5 +47,5 @@
       "@types/follow-redirects": "^1.14.4",
       "@types/node": "^24.0.10"
    },
-   "version": "0.0.25"
+   "version": "0.0.26"
 }

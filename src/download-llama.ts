@@ -6,7 +6,7 @@ import { once } from 'events';
 import { IncomingMessage } from 'http';
 import AdmZip from 'adm-zip';
 
-export const llamaVersion = 'b5657';
+export const llamaVersion = 'b5835';
 
 
 export const hasCUDA = (process.platform === 'linux' && process.env.NVIDIA_VISIBLE_DEVICES && process.env.NVIDIA_DRIVER_CAPABILITIES)
