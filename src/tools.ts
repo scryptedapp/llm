@@ -1,4 +1,4 @@
-import type { Brightness, Camera, ChatCompletionTool, LLMTools, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 
 export class ScryptedTools implements LLMTools {
@@ -9,6 +9,7 @@ export class ScryptedTools implements LLMTools {
         const listCameras = this.listCameras();
         const listLights = this.listLights();
         const listFans = this.listFans();
+        const listNotifiers = this.listNotifiers();
 
         const cams: ChatCompletionTool[] = [];
         if (listCameras.length) {
@@ -152,7 +153,50 @@ export class ScryptedTools implements LLMTools {
             );
         }
 
-        return [...cams, ...lights, ...fans];
+        const notifiers: ChatCompletionTool[] = [];
+        if (listNotifiers.length) {
+            notifiers.push(
+                {
+                    type: 'function',
+                    function: {
+                        name: 'list-notifiers',
+                        description: 'List available notifiers. Notifiers can be used to send notifications to users.',
+                        parameters: {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                            "additionalProperties": false
+                        },
+                    },
+                },
+                {
+                    type: 'function',
+                    function: {
+                        name: 'send-notification',
+                        description: `Send a notification using the requested notifier. If the user does not specify which device should receive a notification, send it to their iPhone or Android. If there is any ambiguity you MUST ask the user where to send it.`,
+                        parameters: {
+                            "type": "object",
+                            "properties": {
+                                "notifier": {
+                                    "type": "string",
+                                    "description": "The id of the notifier to send a notification with.",
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "description": "The message to send in the notification.",
+                                },
+                            },
+                            "required": [
+                                "notifier",
+                                "message",
+                            ],
+                            "additionalProperties": false
+                        },
+                    },
+                });
+        }
+
+        return [...cams, ...lights, ...fans, ...notifiers];
     }
 
     listLights() {
@@ -188,6 +232,19 @@ export class ScryptedTools implements LLMTools {
             return device.interfaces.includes(ScryptedInterface.Camera) && (device.type === ScryptedDeviceType.Camera || device.type === ScryptedDeviceType.Doorbell);
         });
         return cameraIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
+    }
+
+    listNotifiers() {
+        const { sdk } = this;
+        const ids = Object.keys(sdk.systemManager.getSystemState());
+        const notifierIds = ids.filter(id => {
+            const device = sdk.systemManager.getDeviceById(id);
+            return device.interfaces.includes(ScryptedInterface.Notifier);
+        });
+        return notifierIds.map(id => {
+            const d = sdk.systemManager.getDeviceById(id);
+            return d.id + '\n' + '  - ' + d.name;
+        }).join('\n');
     }
 
     async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
@@ -252,6 +309,23 @@ export class ScryptedTools implements LLMTools {
                 return `${lightName} does not support brightness control.`;
             await light.setBrightness(brightness);
             return `${lightName} brightness set to ${brightness}.`;
+        }
+        else if (name === 'list-notifiers') {
+            return `The ids of the available notifiers and their friendly names:\n${this.listNotifiers()}`;
+        }
+        else if (name === 'send-notification') {
+            const notifierName = parameters.notifier;
+            const message = parameters.message;
+            if (!notifierName || !message)
+                return `"notifier" and "message" parameters are required for send-notification tool. Valid notifier names and their ids are: ${this.listNotifiers()}`;
+            const popId = notifierName.split('-').pop();
+            const notifier = sdk.systemManager.getDeviceById<Notifier>(notifierName) || sdk.systemManager.getDeviceByName<Notifier>(notifierName) || sdk.systemManager.getDeviceById<Notifier>(popId);
+            if (!notifier)
+                return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
+            if (!notifier.interfaces.includes(ScryptedInterface.Notifier))
+                return `${notifierName} does not support notifications.`;
+            await notifier.sendNotification(message);
+            return `Notification sent to ${notifierName}.`;
         }
         return 'Unknown tool: ' + name;
     }
