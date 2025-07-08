@@ -323,9 +323,9 @@ export class ScryptedTools implements LLMTools {
             if (!notifier)
                 return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
             if (!notifier.interfaces.includes(ScryptedInterface.Notifier))
-                return `${notifierName} does not support notifications.`;
+                return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
             await notifier.sendNotification(message);
-            return `Notification sent to ${notifierName}.`;
+            return `Notification sent to ${notifier.id}: ${notifier.name}.`;
         }
         return 'Unknown tool: ' + name;
     }
