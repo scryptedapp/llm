@@ -579,6 +579,22 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             sdk.deviceManager.onDeviceRemoved('switch-tools');
         if (sdk.deviceManager.getNativeIds().includes('camera-tools'))
             sdk.deviceManager.onDeviceRemoved('camera-tools');
+
+        this.updateCors();
+    }
+
+
+    async updateCors() {
+        try {
+            await sdk.endpointManager.setAccessControlAllowOrigin({
+                origins: [
+                    'https://chat.scrypted.app',
+                ],
+            });
+        }
+        catch (e) {
+            this.console.error('error updating cors, is your scrypted server up to date?', e);
+        }
     }
 
     async reportDevice(nativeId: ScryptedNativeId, name: string) {
