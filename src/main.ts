@@ -26,9 +26,18 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             placeholder: 'You are a helpful assistant.',
         },
         terminalTools: {
-            title: 'Terminal Tools',
-            description: 'Enable scrypted and search tools for usage in this terminal.',
+            title: 'Scrypted Terminal Tools',
+            description: 'Enable scrypted tools for usage in this terminal. Will grant the LLM full access to all devices in Scrypted.',
             type: 'boolean',
+        },
+        additionalTools: {
+            title: 'Additional Terminal Tools',
+            description: 'Enable additional tools for usage in this terminal.',
+            type: 'device',
+            multiple: true,
+            deviceFilter: ({interfaces, ScryptedInterface}) => {
+                return interfaces.includes(ScryptedInterface.LLMTools);
+            },
         }
     });
 
@@ -92,7 +101,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
-        const llmTools = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk), new WebSearchTools(WebSearchToolsNativeId)] : [];
+        const llmTools: LLMTools[] = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk)] : [];
+        for (const tool of this.storageSettings.values.additionalTools || []) {
+            llmTools.push(sdk.systemManager.getDeviceById<LLMTools>(tool));
+        }
         const tools = await prepareTools(llmTools);
 
         const i = new PassThrough();
