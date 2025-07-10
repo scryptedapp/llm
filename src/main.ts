@@ -13,6 +13,7 @@ import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
+import { WebSearchTools } from './web-search-tools';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
@@ -572,13 +573,26 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
     constructor(nativeId?: string) {
         super(nativeId);
 
-        // legacy
+        // legacy, these are now built into chat. providing this here
+        // is a potential privilege escalation.
+        // the chat site can use the same code but it will only
+        // be able to access the logged in user's devices.
         if (sdk.deviceManager.getNativeIds().includes('tools'))
             sdk.deviceManager.onDeviceRemoved('tools');
         if (sdk.deviceManager.getNativeIds().includes('switch-tools'))
             sdk.deviceManager.onDeviceRemoved('switch-tools');
         if (sdk.deviceManager.getNativeIds().includes('camera-tools'))
             sdk.deviceManager.onDeviceRemoved('camera-tools');
+
+        sdk.deviceManager.onDeviceDiscovered({
+            nativeId: 'search-tools',
+            name: 'Search Tools',
+            type: 'LLMTools',
+            interfaces: [
+                ScryptedInterface.LLMTools,
+                ScryptedInterface.Settings,
+            ],
+        });
 
         this.updateCors();
     }
@@ -708,6 +722,10 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         let found = this.devices.get(nativeId);
         if (found)
             return found;
+
+        if (nativeId === 'search-tools') {
+            return new WebSearchTools(nativeId);
+        }
 
         if (nativeId?.startsWith('openai-')) {
             found = new OpenAIEndpoint(nativeId);

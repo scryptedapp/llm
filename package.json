@@ -26,7 +26,6 @@
       "scrypted-package-json": "scrypted-package-json"
    },
    "scrypted": {
-      "rollup": true,
       "name": "llm",
       "type": "LLM",
       "interfaces": [
@@ -43,9 +42,14 @@
       "openai": "^5.8.2"
    },
    "devDependencies": {
+      "@mozilla/readability": "^0.6.0",
       "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
+      "@types/jsdom": "^21.1.7",
       "@types/node": "^24.0.10"
    },
-   "version": "0.0.27"
+   "optionalDependencies": {
+      "jsdom": "^26.1.0"
+   },
+   "version": "0.0.28"
 }
