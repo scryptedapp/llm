@@ -15,6 +15,8 @@ import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
 import { WebSearchTools } from './web-search-tools';
 
+const WebSearchToolsNativeId = 'search-tools';
+
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
         systemPrompt: {
@@ -25,7 +27,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         },
         terminalTools: {
             title: 'Terminal Tools',
-            description: 'Enable terminal tools for the assistant. This allows the assistant to execute commands on the system. The LLM and users that have access to this LLM will be able to view cameras and operate all home automation devices.',
+            description: 'Enable scrypted and search tools for usage in this terminal.',
             type: 'boolean',
         }
     });
@@ -90,7 +92,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
-        const llmTools = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk)] : [];
+        const llmTools = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk), new WebSearchTools(WebSearchToolsNativeId)] : [];
         const tools = await prepareTools(llmTools);
 
         const i = new PassThrough();
@@ -585,7 +587,7 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             sdk.deviceManager.onDeviceRemoved('camera-tools');
 
         sdk.deviceManager.onDeviceDiscovered({
-            nativeId: 'search-tools',
+            nativeId: WebSearchToolsNativeId,
             name: 'Search Tools',
             type: 'LLMTools',
             interfaces: [
@@ -723,7 +725,7 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         if (found)
             return found;
 
-        if (nativeId === 'search-tools') {
+        if (nativeId === WebSearchToolsNativeId) {
             return new WebSearchTools(nativeId);
         }
 
