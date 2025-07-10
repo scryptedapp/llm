@@ -12,6 +12,7 @@ import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
+import { ScryptedTools } from './tools';
 import { WebSearchTools } from './web-search-tools';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
@@ -89,7 +90,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 
     async* connectStreamService(input: AsyncGenerator<Buffer>): AsyncGenerator<Buffer> {
-        const llmTools = this.storageSettings.values.terminalTools ? [new WebSearchTools()] : [];
+        const llmTools = this.storageSettings.values.terminalTools ? [new ScryptedTools(sdk)] : [];
         const tools = await prepareTools(llmTools);
 
         const i = new PassThrough();
