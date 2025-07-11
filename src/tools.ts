@@ -196,7 +196,21 @@ export class ScryptedTools implements LLMTools {
                 });
         }
 
-        return [...cams, ...lights, ...fans, ...notifiers];
+        const timeTool: ChatCompletionTool = {
+            type: 'function',
+            function: {
+                name: 'get-time',
+                description: `Gets the current time.\nDate: ${new Date().toLocaleDateString()}.\nTime Zone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+                parameters: {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": false
+                },
+            },
+        };
+
+        return [...cams, ...lights, ...fans, ...notifiers, timeTool];
     }
 
     listLights() {
@@ -326,6 +340,9 @@ export class ScryptedTools implements LLMTools {
                 return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
             await notifier.sendNotification(message);
             return `Notification sent to ${notifier.id}: ${notifier.name}.`;
+        }
+        else if (name === 'get-time') {
+            return new Date().toLocaleString() + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone;
         }
         return 'Unknown tool: ' + name;
     }
