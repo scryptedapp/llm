@@ -1,7 +1,8 @@
 import type { LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
-import type { ChatCompletionContentPartImage } from 'openai/resources';
+import type { ChatCompletionTool, ChatCompletionContentPartImage } from 'openai/resources';
 import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
+import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
 
 export async function prepareTools(allLLMTools: LLMTools[]) {
     const toolsPromises = allLLMTools.map(async llmTools => {
@@ -24,20 +25,25 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
 
     const toolTuples = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
     const map: Record<string, LLMTools> = {};
+    // Used to deduplciate tools that are provided by multiple LLMTools implementations like get-time.
+    const toolMap: Record<string, ChatCompletionTool> = {};
     for (const entry of toolTuples) {
         map[entry.tool.function.name] = entry.llmTools;
+        toolMap[entry.tool.function.name] = entry.tool;
     }
 
-    const tools = toolTuples.map(t => t.tool);
+    const tools = Object.values(toolMap);
 
     const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => {
         const tool = map[toolCall.function.name];
         if (!tool)
             throw new Error(`Tool ${toolCall} not found.`);
+        // intercept time tool calls to provide a user locale time.
+        if (toolCall.function.name === TimeToolFunctionName) 
+            return callGetTimeTool();
         const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
         return result;
     }
-
 
     return {
         tools,

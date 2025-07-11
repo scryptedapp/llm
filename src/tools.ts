@@ -1,5 +1,6 @@
 import type { Brightness, Camera, ChatCompletionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
+import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
 
 export class ScryptedTools implements LLMTools {
     constructor(public sdk: ScryptedStatic) {
@@ -196,21 +197,7 @@ export class ScryptedTools implements LLMTools {
                 });
         }
 
-        const timeTool: ChatCompletionTool = {
-            type: 'function',
-            function: {
-                name: 'get-time',
-                description: `Gets the current time.\nDate: ${new Date().toLocaleDateString()}.\nTime Zone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
-                parameters: {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                    "additionalProperties": false
-                },
-            },
-        };
-
-        return [...cams, ...lights, ...fans, ...notifiers, timeTool];
+        return [...cams, ...lights, ...fans, ...notifiers, getTimeToolFunction()];
     }
 
     listLights() {
@@ -341,8 +328,8 @@ export class ScryptedTools implements LLMTools {
             await notifier.sendNotification(message);
             return `Notification sent to ${notifier.id}: ${notifier.name}.`;
         }
-        else if (name === 'get-time') {
-            return new Date().toLocaleString() + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone;
+        else if (name === TimeToolFunctionName) {
+            return callGetTimeTool();
         }
         return 'Unknown tool: ' + name;
     }

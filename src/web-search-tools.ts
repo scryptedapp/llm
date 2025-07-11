@@ -1,7 +1,8 @@
-import type { JSDOM as JSDOMType } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { ChatCompletionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
+import type { JSDOM as JSDOMType } from 'jsdom';
+import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from './time-tool';
 
 interface SearXNGResult {
     title: string;
@@ -25,6 +26,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
 
     async getLLMTools(): Promise<ChatCompletionTool[]> {
         return [
+            getTimeToolFunction(),
             {
                 type: 'function',
                 function: {
@@ -130,6 +132,10 @@ ${index}. ${result.title}
             return await this.searchWeb(parameters.query);
         } else if (name === 'get-web-page-content') {
             return await this.getWebPageContent(parameters.url);
+        }
+        else if (name === TimeToolFunctionName) {
+            // this call may be intercepted by the browser to provide a user locale time.
+            return callGetTimeTool();
         }
 
         return 'Unknown tool: ' + name;
