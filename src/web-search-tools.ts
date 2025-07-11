@@ -1,4 +1,4 @@
-import { JSDOM } from 'jsdom';
+import type { JSDOM as JSDOMType } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import { ChatCompletionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
@@ -107,6 +107,7 @@ ${index}. ${result.title}
             const html = await response.text();
 
             // Parse HTML into a DOM
+            const { JSDOM } = require('jsdom') as { JSDOM: typeof JSDOMType };
             const dom = new JSDOM(html, { url });
             const document = dom.window.document;
 
