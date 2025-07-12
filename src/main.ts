@@ -20,8 +20,8 @@ const WebSearchToolsNativeId = 'search-tools';
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
         systemPrompt: {
-            title: 'System Prompt',
-            description: 'The system prompt to use for the OpenAI compatible endpoint.',
+            title: 'Terminal System Prompt',
+            description: 'The system prompt to use inside the terminal session.',
             type: 'textarea',
             placeholder: 'You are a helpful assistant.',
         },
