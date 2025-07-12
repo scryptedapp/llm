@@ -19,12 +19,6 @@ const WebSearchToolsNativeId = 'search-tools';
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
-        systemPrompt: {
-            title: 'Terminal System Prompt',
-            description: 'The system prompt to use inside the terminal session.',
-            type: 'textarea',
-            placeholder: 'You are a helpful assistant.',
-        },
         chatCompletionCapabilities: {
             title: 'Capabilities',
             description: 'The capabilities of the model. This is used to determine which features are available.',
@@ -37,6 +31,12 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 'audio',
                 'audioGeneration',
             ],
+        },
+        systemPrompt: {
+            title: 'Terminal System Prompt',
+            description: 'The system prompt to use inside the terminal session.',
+            type: 'textarea',
+            placeholder: 'You are a helpful assistant.',
         },
         terminalTools: {
             title: 'Scrypted Terminal Tools',
