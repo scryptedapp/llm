@@ -90,7 +90,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
                 return 'No results found.';
             }
 
-            const header = `The following are the Search results for "${query}". Consider using get-web-page-content tool in batches of 5 until you can arrive at an answer the query. If a web page provides an answer to the query, include the link in your response:\n`;
+            const header = `The following are the Search results for "${query}". To gather further information from these links, use the get-web-page-content tool. You MUST use multiple get-web-page-content tool calls in a single response if you intend to retrieve content from multiple pages. This will gather them simultaneously. If a web page provides an answer to the query, include the link in your response:\n`;
 
             return header + data.results.map((result, index) =>
                 `
