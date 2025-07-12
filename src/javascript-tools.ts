@@ -17,7 +17,7 @@ export function getEvaluateJsToolFunction(): ChatCompletionTool {
         type: 'function',
         function: {
             name: EvaluateJsToolFunctionName,
-            description: 'Evaluates JavaScript in the browser using the standard eval function. This tool MUST be used for calculations and checking the current time checking. You can also use it to determine the user locale.',
+            description: 'Evaluates JavaScript in the browser using the standard eval function. This tool MUST be used for calculations and checking the current time. You can also use it to determine the user locale.',
             parameters: {
                 type: 'object',
                 properties: {
