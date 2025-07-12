@@ -20,7 +20,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
             title: 'SearxNG URL',
             description: 'The URL of your SearxNG instance. Example: https://searxng.example.com/',
             type: 'string',
-            placeholder: 'https://searxng.example.com/',
+            placeholder: 'https://searxng.example.com/search',
         }
     });
 
