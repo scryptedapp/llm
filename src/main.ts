@@ -1,5 +1,5 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { ChatCompletion, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import type { ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import sdk, { ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
@@ -25,6 +25,19 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             type: 'textarea',
             placeholder: 'You are a helpful assistant.',
         },
+        chatCompletionCapabilities: {
+            title: 'Capabilities',
+            description: 'The capabilities of the model. This is used to determine which features are available.',
+            type: 'string',
+            defaultValue: ['image'],
+            multiple: true,
+            choices: [
+                'image',
+                'imageGeneration',
+                'audio',
+                'audioGeneration',
+            ],
+        },
         terminalTools: {
             title: 'Scrypted Terminal Tools',
             description: 'Enable scrypted tools for usage in this terminal. Will grant the LLM full access to all devices in Scrypted.',
@@ -40,6 +53,15 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             },
         }
     });
+    
+    constructor(nativeId?: string) {
+        super(nativeId);
+        const defaultCapabilities: ChatCompletionCapabilities = {
+            image: true,
+        };
+        this.chatCompletionCapabilities ||= defaultCapabilities;
+        this.storageSettings.values.chatCompletionCapabilities = Object.entries(this.chatCompletionCapabilities).filter(([key, value]) => value).map(([key]) => key) as any;
+    };
 
     abstract getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion>;
     abstract streamChatCompletionInternal(body: ChatCompletionStreamParams): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion>;

@@ -36,21 +36,21 @@
    },
    "dependencies": {
       "@scrypted/deferred": "^0.0.8",
-      "@scrypted/sdk": "^0.5.29",
-      "@scrypted/types": "^0.5.27",
+      "@scrypted/sdk": "^0.5.30",
+      "@scrypted/types": "^0.5.28",
       "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",
-      "openai": "^5.8.2"
+      "openai": "^5.9.0"
    },
    "devDependencies": {
       "@mozilla/readability": "^0.6.0",
       "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
       "@types/jsdom": "^21.1.7",
-      "@types/node": "^24.0.10"
+      "@types/node": "^24.0.13"
    },
    "optionalDependencies": {
       "jsdom": "^26.1.0"
    },
-   "version": "0.0.35"
+   "version": "0.0.36"
 }
