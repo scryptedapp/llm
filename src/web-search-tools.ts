@@ -18,7 +18,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
     storageSettings = new StorageSettings(this, {
         searxng: {
             title: 'SearxNG URL',
-            description: 'The URL of your SearxNG instance. Example: https://searxng.example.com/',
+            description: 'The URL of your SearxNG instance. Example: https://searxng.example.com/search',
             type: 'string',
             placeholder: 'https://searxng.example.com/search',
         }
