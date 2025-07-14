@@ -1,6 +1,6 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
-import sdk, { ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
+import type { ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import sdk, { HttpRequestHandler, ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
@@ -13,6 +13,7 @@ import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
+import { Database, UserDatabase, UserLevel } from './user-database';
 import { WebSearchTools } from './web-search-tools';
 
 const WebSearchToolsNativeId = 'search-tools';
@@ -55,12 +56,12 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             description: 'Enable additional tools for usage in this terminal.',
             type: 'device',
             multiple: true,
-            deviceFilter: ({interfaces, ScryptedInterface}) => {
+            deviceFilter: ({ interfaces, ScryptedInterface }) => {
                 return interfaces.includes(ScryptedInterface.LLMTools);
             },
         }
     });
-    
+
     constructor(nativeId?: string) {
         super(nativeId);
         const defaultCapabilities: ChatCompletionCapabilities = {
@@ -610,8 +611,12 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
     }
 }
 
-class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator {
+class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler {
     devices = new Map<ScryptedNativeId, BaseLLM>();
+    userDatabases = new Map<string, {
+        token: string,
+        database: Database,
+    }>();
 
     constructor(nativeId?: string) {
         super(nativeId);
@@ -640,6 +645,57 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         this.updateCors();
     }
 
+    async openDatabase(token: string): Promise<Database> {
+        const userDatabase = this.userDatabases.get(token);
+        if (!userDatabase) {
+            throw new Error('User database not found for token: ' + token);
+        }
+        return userDatabase.database;
+    }
+
+    async onRequest(request: HttpRequest, response: HttpResponse): Promise<void> {
+        if (!request.username) {
+            return response.send('', {
+                code: 401,
+            });
+        }
+
+        if (request.url !== '/endpoint/@scrypted/llm/public/token') {
+            return response.send('', {
+                code: 404,
+            });
+        }
+
+        let userDatabase = this.userDatabases.get(request.username);
+        if (!userDatabase) {
+            const token = Math.random().toString(16).slice(2, 10);
+            const sha256Username = require('crypto').createHash('sha256').update(request.username).digest('hex');
+            userDatabase = {
+                token,
+                database: new Database(new UserLevel(sha256Username)),
+            };
+            this.userDatabases.set(request.username, userDatabase);
+            try {
+                await userDatabase.database.level.open();
+            }
+            catch (e) {
+                if (this.userDatabases.get(request.username) === userDatabase) {
+                    this.userDatabases.delete(request.username);
+                }
+                return response.send('', {
+                    code: 500,
+                });
+            }
+        }
+
+        response.send(JSON.stringify({
+            token: request.username,
+        }), {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    }
 
     async updateCors() {
         try {
