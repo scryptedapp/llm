@@ -660,7 +660,7 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             });
         }
 
-        if (request.url !== '/endpoint/@scrypted/llm/public/token') {
+        if (!request.url?.startsWith('/endpoint/@scrypted/llm/public/token')) {
             return response.send('', {
                 code: 404,
             });
