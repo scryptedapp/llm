@@ -448,10 +448,12 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             defaultValue: [
                 '-ngl 999',
                 '--jinja',
+                '-fa',
             ],
             choices: [
                 '-ngl 999',
                 '--jinja',
+                '-fa',
             ],
             onPut: () => {
                 this.stopLlamaServer();
