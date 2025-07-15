@@ -1,7 +1,6 @@
 import { LLMTools, ChatCompletionTool, ScryptedDeviceBase, Settings, SettingValue } from "@scrypted/sdk";
 import { StorageSettings } from "@scrypted/sdk/storage-settings";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Client as ClientType } from "@modelcontextprotocol/sdk/client/index.js";
 
 
 export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings {
@@ -22,7 +21,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
         }
     });
 
-    client: Client | undefined;
+    client: ClientType | undefined;
 
     async reconnect() {
         await this.client?.close();
@@ -38,6 +37,8 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
             return;
         }
 
+        const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+
         this.client = new Client({
             name: 'Scrypted LLM Plugin',
             version: '0.0.1',
@@ -46,6 +47,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
 
         const token = this.storageSettings.values.token;
         try {
+            const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
             await this.client.connect(new StreamableHTTPClientTransport(new URL(this.storageSettings.values.mcpServer), {
                 requestInit: {
                     headers: token
@@ -80,7 +82,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
             name,
             arguments: parameters,
         })
-        const {content} = result as any;
+        const { content } = result as any;
         if (!content?.[0]) {
             return 'Tool call did not return any content.';
         }
