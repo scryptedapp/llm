@@ -2,7 +2,6 @@ import { LLMTools, ChatCompletionTool, ScryptedDeviceBase, Settings, SettingValu
 import { StorageSettings } from "@scrypted/sdk/storage-settings";
 import type { Client as ClientType } from "@modelcontextprotocol/sdk/client/index.js";
 
-
 export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings {
     storageSettings = new StorageSettings(this, {
         mcpServer: {
@@ -37,7 +36,9 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
             return;
         }
 
-        const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+        const modulePath = "@modelcontextprotocol/sdk/client/index.js";
+
+        const { Client } = await import(modulePath);
 
         this.client = new Client({
             name: 'Scrypted LLM Plugin',
@@ -47,8 +48,9 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
 
         const token = this.storageSettings.values.token;
         try {
-            const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
-            await this.client.connect(new StreamableHTTPClientTransport(new URL(this.storageSettings.values.mcpServer), {
+            const modulePath = "@modelcontextprotocol/sdk/client/streamableHttp.js";
+            const { StreamableHTTPClientTransport } = await import(modulePath)
+            await this.client!.connect(new StreamableHTTPClientTransport(new URL(this.storageSettings.values.mcpServer), {
                 requestInit: {
                     headers: token
                         ? {

@@ -13,7 +13,7 @@ import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
-import { Database, UserDatabase, UserLevel } from './user-database';
+import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
 import { MCPServer } from './mcp-server';
 
@@ -673,6 +673,14 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         if (!userDatabase) {
             const token = Math.random().toString(16).slice(2, 10);
             const sha256Username = require('crypto').createHash('sha256').update(request.username).digest('hex');
+            const { Level } = await import("level");
+
+            class UserLevel extends Level {
+                constructor(userId: string) {
+                    super(path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, userId));
+                }
+            }
+
             userDatabase = {
                 token,
                 database: new Database(new UserLevel(sha256Username)),
