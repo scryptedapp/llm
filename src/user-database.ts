@@ -6,8 +6,11 @@ export class Database {
     constructor(public level: AbstractLevel<any, string>) {
     }
 
-    get(key: string): Promise<any> {
-        return this.level.get(key);
+    async get(key: string): Promise<any> {
+        const ret = await this.level.get(key);
+        if (!ret)
+            return ret;
+        return JSON.parse(ret);
     }
     async sublevel(sublevelName: string): Promise<Database> {
         return new Database(this.level.sublevel(sublevelName));
