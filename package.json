@@ -62,6 +62,7 @@
       "@types/node": "^24.0.13"
    },
    "optionalDependencies": {
+      "@modelcontextprotocol/sdk": "^1.15.1",
       "jsdom": "^26.1.0"
    },
    "version": "0.0.42"

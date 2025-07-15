@@ -15,6 +15,7 @@ import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
 import { Database, UserDatabase, UserLevel } from './user-database';
 import { WebSearchTools } from './web-search-tools';
+import { MCPServer } from './mcp-server';
 
 const WebSearchToolsNativeId = 'search-tools';
 
@@ -612,7 +613,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
 }
 
 class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler {
-    devices = new Map<ScryptedNativeId, BaseLLM>();
+    devices = new Map<ScryptedNativeId, any>();
     userDatabases = new Map<string, {
         token: string,
         database: Database,
@@ -732,8 +733,23 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         const randomHex = Math.random().toString(16).slice(2, 10);
         if (!settings.type)
             throw new Error('Type is required to create a device.');
-        if (settings.type === 'OpenAI Endpoint') {
+        if (settings.type === 'OpenAI Server') {
             return await this.reportDevice('openai-' + randomHex, settings.name as string);
+        }
+        else if (settings.type === 'MCP Server') {
+            const nativeId = 'mcp-' + randomHex;
+            const device = new MCPServer(nativeId);
+            this.devices.set(nativeId, device);
+            const id = await sdk.deviceManager.onDeviceDiscovered({
+                nativeId,
+                name: settings.name as string,
+                type: 'LLM',
+                interfaces: [
+                    ScryptedInterface.LLMTools,
+                    ScryptedInterface.Settings,
+                ],
+            });
+            return id;
         }
         else if (settings.type === 'llama.cpp') {
             const nativeId = 'llama-' + randomHex;
@@ -765,8 +781,9 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
                 title: 'Type',
                 type: 'radiopanel',
                 choices: [
-                    'OpenAI Endpoint',
+                    'OpenAI Server',
                     'llama.cpp',
+                    'MCP Server',
                 ],
             },
             model: {
@@ -836,6 +853,14 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
             found = new LlamaCPP(nativeId);
             this.devices.set(nativeId, found);
             this.reportDevice(nativeId, found.name!);
+            return found;
+        }
+        if (nativeId?.startsWith('mcp-')) {
+            found = this.devices.get(nativeId);
+            if (!found) {
+                found = new MCPServer(nativeId);
+                this.devices.set(nativeId, found);
+            }
             return found;
         }
     }
