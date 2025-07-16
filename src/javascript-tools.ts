@@ -1,14 +1,29 @@
-import type { LLMTools, ChatCompletionTool } from '@scrypted/types';
+import type { CallToolResult, LLMTools, ChatCompletionTool } from '@scrypted/types';
+import { createToolTextResult, createUnknownToolError } from './tools-common';
 
 export const EvaluateJsToolFunctionName = 'evaluate-js';
 
 // Evaluates JavaScript code in a restricted browser context
-export function evaluateJs(code: string): string {
+export function evaluateJs(code: string): CallToolResult {
     try {
         const result = eval(code);
-        return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        if (typeof result === 'string') {
+            return createToolTextResult(result);
+        }
+        const ret: CallToolResult = {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(result, null, 2),
+                },
+            ],
+            structuredContent: {
+                result,
+            }
+        }
+        return ret;
     } catch (e: any) {
-        return `Error: ${e.message}`;
+        return createToolTextResult(`Error evaluating code: ${e.message}`);
     }
 }
 
@@ -38,11 +53,11 @@ export class JavascriptTools implements LLMTools {
         return [getEvaluateJsToolFunction()];
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
+    async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === EvaluateJsToolFunctionName) {
             const { code } = parameters;
-            return evaluateJs(code) || '';
+            return evaluateJs(code);
         }
-        throw new Error(`Unknown tool: ${name}`);
+        throw createUnknownToolError(name);
     }
 }

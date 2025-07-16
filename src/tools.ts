@@ -1,6 +1,7 @@
 import type { Brightness, Camera, ChatCompletionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
+import { createToolTextImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
 
 export class ScryptedTools implements LLMTools {
     constructor(public sdk: ScryptedStatic) {
@@ -248,89 +249,89 @@ export class ScryptedTools implements LLMTools {
         }).join('\n');
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
+    async callLLMTool(name: string, parameters: Record<string, any>) {
         const { sdk } = this;
 
         if (name === 'take-picture') {
             const cameraName = parameters.camera;
             if (!cameraName)
-                return `"camera" parameter is required for take-picture tool. Valid camera names are: ${this.listCameras()}`;
+                return createToolTextResult(`"camera" parameter is required for take-picture tool. Valid camera names are: ${this.listCameras()}`);
             const camera = sdk.systemManager.getDeviceByName<Camera>(cameraName);
             if (!camera || !camera.interfaces.includes(ScryptedInterface.Camera))
-                return `${cameraName} is not a valid camera. Valid camera names are: ${this.listCameras()}`;
+                return createToolTextResult(`${cameraName} is not a valid camera. Valid camera names are: ${this.listCameras()}`);
             const picture = await camera.takePicture();
             const buffer = await sdk.mediaManager.convertMediaObjectToBuffer(picture, 'image/jpeg');
-            return 'data:image/jpeg;base64,' + buffer.toString('base64');
+            return createToolTextImageResult(buffer.toString('base64'));
         }
         else if (name === 'turn-light-on' || name === 'turn-light-off') {
             const lightName = parameters.light;
             if (!lightName)
-                return `"light" parameter is required for ${name} tool. Valid light names are: ${this.listLights()}`;
+                return createToolTextResult(`"light" parameter is required for ${name} tool. Valid light names are: ${this.listLights()}`);
             const light = sdk.systemManager.getDeviceByName<OnOff>(lightName);
             if (!light)
-                return `${lightName} is not a valid light. Valid light names are: ${this.listLights()}`;
+                return createToolTextResult(`${lightName} is not a valid light. Valid light names are: ${this.listLights()}`);
             if (!light.interfaces.includes(ScryptedInterface.OnOff))
-                return `${lightName} does not support on/off control.`;
+                return createToolTextResult(`${lightName} does not support on/off control.`);
             if (name === 'turn-light-on') {
                 await light.turnOn();
-                return `${lightName} turned on.`;
+                return createToolTextResult(`${lightName} turned on.`);
             }
             else if (name === 'turn-light-off') {
                 await light.turnOff();
-                return `${lightName} turned off.`;
+                return createToolTextResult(`${lightName} turned off.`);
             }
         }
         else if (name === 'turn-fan-on' || name === 'turn-fan-off') {
             const fanName = parameters.fan;
             if (!fanName)
-                return `"fan" parameter is required for ${name} tool. Valid fan names are: ${this.listFans()}`;
+                return createToolTextResult(`"fan" parameter is required for ${name} tool. Valid fan names are: ${this.listFans()}`);
             const fan = sdk.systemManager.getDeviceByName<OnOff>(fanName);
             if (!fan)
-                return `${fanName} is not a valid fan. Valid fan names are: ${this.listFans()}`;
+                return createToolTextResult(`${fanName} is not a valid fan. Valid fan names are: ${this.listFans()}`);
             if (!fan.interfaces.includes(ScryptedInterface.OnOff))
-                return `${fanName} does not support on/off control.`;
+                return createToolTextResult(`${fanName} does not support on/off control.`);
             if (name === 'turn-fan-on') {
                 await fan.turnOn();
-                return `${fanName} turned on.`;
+                return createToolTextResult(`${fanName} turned on.`);
             }
             else if (name === 'turn-fan-off') {
                 await fan.turnOff();
-                return `${fanName} turned off.`;
+                return createToolTextResult(`${fanName} turned off.`);
             }
         }
         else if (name === 'set-light-brightness') {
             const lightName = parameters.light;
             const brightness = parameters.brightness;
             if (!lightName || brightness === undefined)
-                return `"light" and "brightness" parameters are required for ${name} tool. Valid light names are: ${this.listLights()}`;
+                return createToolTextResult(`"light" and "brightness" parameters are required for ${name} tool. Valid light names are: ${this.listLights()}`);
             const light = sdk.systemManager.getDeviceByName<Brightness>(lightName);
             if (!light)
-                return `${lightName} is not a valid light. Valid light names are: ${this.listLights()}`;
+                return createToolTextResult(`${lightName} is not a valid light. Valid light names are: ${this.listLights()}`);
             if (!light.interfaces.includes(ScryptedInterface.Brightness))
-                return `${lightName} does not support brightness control.`;
+                return createToolTextResult(`${lightName} does not support brightness control.`);
             await light.setBrightness(brightness);
-            return `${lightName} brightness set to ${brightness}.`;
+            return createToolTextResult(`${lightName} brightness set to ${brightness}.`);
         }
         else if (name === 'list-notifiers') {
-            return `The ids of the available notifiers and their friendly names:\n${this.listNotifiers()}`;
+            return createToolTextResult(`The ids of the available notifiers and their friendly names:\n${this.listNotifiers()}`);
         }
         else if (name === 'send-notification') {
             const notifierName = parameters.notifier;
             const message = parameters.message;
             if (!notifierName || !message)
-                return `"notifier" and "message" parameters are required for send-notification tool. Valid notifier names and their ids are: ${this.listNotifiers()}`;
+                return createToolTextResult(`"notifier" and "message" parameters are required for send-notification tool. Valid notifier names and their ids are: ${this.listNotifiers()}`);
             const popId = notifierName.split('-').pop();
             const notifier = sdk.systemManager.getDeviceById<Notifier>(notifierName) || sdk.systemManager.getDeviceByName<Notifier>(notifierName) || sdk.systemManager.getDeviceById<Notifier>(popId);
             if (!notifier)
-                return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
+                return createToolTextResult(`${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`);
             if (!notifier.interfaces.includes(ScryptedInterface.Notifier))
-                return `${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`;
+                return createToolTextResult(`${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`);
             await notifier.sendNotification(message);
-            return `Notification sent to ${notifier.id}: ${notifier.name}.`;
+            return createToolTextResult(`Notification sent to ${notifier.id}: ${notifier.name}.`);
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();
         }
-        return 'Unknown tool: ' + name;
+        return createUnknownToolError(name);
     }
 }

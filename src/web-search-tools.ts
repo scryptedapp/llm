@@ -1,8 +1,9 @@
 import { Readability } from '@mozilla/readability';
-import { ChatCompletionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue } from '@scrypted/sdk';
+import { CallToolResult, ChatCompletionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue, TextContent, TextResourceContents } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import type { JSDOM as JSDOMType } from 'jsdom';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from './time-tool';
+import { createToolTextResult, createUnknownToolError } from './tools-common';
 
 interface SearXNGResult {
     title: string;
@@ -70,9 +71,10 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         ]
     }
 
-    async searchWeb(query: string): Promise<string> {
-        if (!this.storageSettings.values.searxng)
-            return 'Search failed. Inform the user: The SearXNG URL must be configured in the LLM Plugin settings.';
+    async searchWeb(query: string): Promise<CallToolResult> {
+        if (!this.storageSettings.values.searxng) {
+            return createToolTextResult('Search failed. Inform the user: The SearXNG URL must be configured in the LLM Plugin settings.');
+        }
 
         const searxngUrl = this.storageSettings.values.searxng;
         const encodedQuery = encodeURIComponent(query);
@@ -81,29 +83,44 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         try {
             const response = await fetch(apiEndpoint);
             if (!response.ok) {
-                return `HTTP error! Status: ${response.status}`;
+                return createToolTextResult(`HTTP error! Status: ${response.status}`);
             }
 
             const data: SearXNGResponse = await response.json();
 
+
             if (!data.results.length) {
-                return 'No results found.';
+                return createToolTextResult('No results found.');
             }
 
             const header = `The following are the Search results for "${query}". To gather further information from these links, use the get-web-page-content tool. You MUST use multiple get-web-page-content tool calls in a single response if you intend to retrieve content from multiple pages. This will gather them simultaneously. If a web page provides an answer to the query, include the link in your response:\n`;
+            const content: TextContent = {
+                type: 'text',
+                text: '',
+            };
+            const ret: CallToolResult = {
+                content: [
+                    content,
+                ],
+            };
 
-            return header + data.results.map((result, index) =>
+            ret.structuredContent = {
+                results: data.results,
+            };
+            content.text = header + data.results.map((result, index) =>
                 `
 ${index}. ${result.title}
     - ${result.url}
     - ${result.content}`
             ).join('\n');
+
+            return ret;
         } catch (error) {
-            return `Search failed with backend error. Inform the user: ${error}`;
+            return createToolTextResult(`Search failed with backend error. Inform the user: ${error}`);
         }
     }
 
-    async getWebPageContent(url: string): Promise<string> {
+    async getWebPageContent(url: string): Promise<CallToolResult> {
         try {
             const response = await fetch(url);
             const html = await response.text();
@@ -118,16 +135,17 @@ ${index}. ${result.title}
             const article = reader.parse();
 
             if (article) {
-                return `# URL: ${url}\n\n# Title: ${article.title}\n\n# Content: ${article.textContent}`;
+                return createToolTextResult(`# URL: ${url}\n\n# Title: ${article.title}\n\n# Content: ${article.textContent}`);
+
             } else {
-                return `# URL: ${url}\n\nFailed to parse article`;
+                return createToolTextResult(`# URL: ${url}\n\nFailed to parse article`);
             }
         } catch (error) {
-            return `# URL: ${url}\n\nError fetching or parsing article:\n${error}`;
+            return createToolTextResult(`# URL: ${url}\n\nError fetching or parsing article:\n${error}`);
         }
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
+    async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === 'search-web') {
             return await this.searchWeb(parameters.query);
         } else if (name === 'get-web-page-content') {
@@ -138,7 +156,7 @@ ${index}. ${result.title}
             return callGetTimeTool();
         }
 
-        return 'Unknown tool: ' + name;
+        return createUnknownToolError(name);
     }
 
     async getSettings() {

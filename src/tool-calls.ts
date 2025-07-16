@@ -39,7 +39,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
         if (!tool)
             throw new Error(`Tool ${toolCall} not found.`);
         // intercept time tool calls to provide a user locale time.
-        if (toolCall.function.name === TimeToolFunctionName) 
+        if (toolCall.function.name === TimeToolFunctionName)
             return callGetTimeTool();
         const result = await tool.callLLMTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
         return result;
@@ -62,36 +62,42 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
         const response = await tools.toolCall(tc);
         // tool calls cant return images, so fake it out by having the tool respond
         // that the next user message will include the image and the assistant respond ok.
-        if (response.startsWith('data:')) {
-            messages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: 'The next user message will include the image.',
-            });
-            messages.push({
-                role: 'assistant',
-                content: 'Ok.',
-            });
 
-            const image: ChatCompletionContentPartImage = {
-                type: 'image_url',
-                image_url: {
-                    url: response,
-                },
-            };
-            messages.push({
-                role: 'user',
-                content: [
-                    image,
-                ],
-            });
-        }
-        else {
-            messages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: response,
-            });
+        for (const content of response.content) {
+            if (content.type === 'image') {
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: tc.id,
+                    content: 'The next user message will include the image.',
+                });
+                messages.push({
+                    role: 'assistant',
+                    content: 'Ok.',
+                });
+
+                const image: ChatCompletionContentPartImage = {
+                    type: 'image_url',
+                    image_url: {
+                        url: content.data,
+                    },
+                };
+                messages.push({
+                    role: 'user',
+                    content: [
+                        image,
+                    ],
+                });
+            }
+            else if (content.type === 'text'){
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: tc.id,
+                    content: content.text,
+                });
+            }
+            else {
+                throw new Error(`Unsupported content type ${content.type} in tool call response.`);
+            }
         }
 
         if (assistantUsesFunctionCalls) {

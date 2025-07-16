@@ -1,4 +1,4 @@
-import { LLMTools, ChatCompletionTool, ScryptedDeviceBase, Settings, SettingValue } from "@scrypted/sdk";
+import { LLMTools, ChatCompletionTool, ScryptedDeviceBase, Settings, SettingValue, CallToolResult } from "@scrypted/sdk";
 import { StorageSettings } from "@scrypted/sdk/storage-settings";
 import type { Client as ClientType } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -78,20 +78,15 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
         }))
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>): Promise<string> {
+    async callLLMTool(name: string, parameters: Record<string, any>): Promise<CallToolResult> {
         await this.ensureClientConnected();
         const result = await this.client!.callTool({
             name,
             arguments: parameters,
-        })
-        const { content } = result as any;
-        if (!content?.[0]) {
-            return 'Tool call did not return any content.';
-        }
-        if (content[0].type === 'text') {
-            return content[0].text;
-        }
-        return 'Tool call returned non-text content.';
+        });
+        // goddamnit zod.
+        // @ts-expect-error
+        return result;
     }
 
     async getSettings() {
