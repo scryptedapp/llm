@@ -75,10 +75,12 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     content: 'Ok.',
                 });
 
+                // create a base 64 data url
+                const url = `data:${content.mimeType};base64,${content.data}`;
                 const image: ChatCompletionContentPartImage = {
                     type: 'image_url',
                     image_url: {
-                        url: content.data,
+                        url,
                     },
                 };
                 messages.push({
