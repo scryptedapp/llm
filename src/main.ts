@@ -210,11 +210,13 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         continue;
                     }
 
-                    const messages = await handleToolCalls(tools, message, this.functionCalls, tc => {
+                    const allMessages = await handleToolCalls(tools, message, this.functionCalls, tc => {
                         q.submit(Buffer.from(`\n\n${this.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
                     });
 
-                    userMessageQueue.submit(messages);
+                    for (const toolMessage of allMessages) {
+                        userMessageQueue.submit(toolMessage.messages);
+                    }
                 }
             }
             catch (e) {

@@ -1,4 +1,4 @@
-import type { LLMTools } from "@scrypted/types";
+import type { CallToolResult, LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionTool, ChatCompletionContentPartImage } from 'openai/resources';
 import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
@@ -55,22 +55,35 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
     if (!message.tool_calls)
         throw new Error('Message does not contain tool calls.');
 
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    type ToolCallData = {
+        toolCall: ParsedFunctionToolCall;
+        callToolResult: CallToolResult;
+        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+    };
+    const allMessages: ToolCallData[] = [];
 
     for (const tc of message.tool_calls) {
         callingTool?.(tc);
         const response = await tools.toolCall(tc);
+
+        const messages: ToolCallData = {
+            toolCall: tc,
+            messages: [],
+            callToolResult: response,
+        };
+        allMessages.push(messages);
+
         // tool calls cant return images, so fake it out by having the tool respond
         // that the next user message will include the image and the assistant respond ok.
 
         for (const content of response.content) {
             if (content.type === 'image') {
-                messages.push({
+                messages.messages.push({
                     role: 'tool',
                     tool_call_id: tc.id,
                     content: 'The next user message will include the image.',
                 });
-                messages.push({
+                messages.messages.push({
                     role: 'assistant',
                     content: 'Ok.',
                 });
@@ -83,15 +96,15 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         url,
                     },
                 };
-                messages.push({
+                messages.messages.push({
                     role: 'user',
                     content: [
                         image,
                     ],
                 });
             }
-            else if (content.type === 'text'){
-                messages.push({
+            else if (content.type === 'text') {
+                messages.messages.push({
                     role: 'tool',
                     tool_call_id: tc.id,
                     content: content.text,
@@ -116,5 +129,5 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
 
     message.function_call = null;
 
-    return messages;
+    return allMessages;
 }

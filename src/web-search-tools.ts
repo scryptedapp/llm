@@ -9,6 +9,9 @@ interface SearXNGResult {
     title: string;
     url: string;
     content: string;
+    category: string;
+    thumbnail_src?: string;
+    thumbnail?: string;
 }
 
 interface SearXNGResponse {
@@ -40,6 +43,14 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
                                 "type": "string",
                                 "description": "The search query. Rather than using the user input directly, construct a good query for their intent to ensure good results.",
                             },
+                            "categories": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["general", "news", "images", "videos"]
+                                },
+                                "description": "Optional array of search categories to filter results. The default category is general, and should typically be used. The query should guide which categories are relevant, if the user may want to see images of their query, include that category. The image and video results will not be returned as results, but will be presented to the user automatically."
+                            }
                         },
                         "required": [
                             "query",
@@ -71,14 +82,19 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         ]
     }
 
-    async searchWeb(query: string): Promise<CallToolResult> {
+    async searchWeb(query: string, categories?: string[]): Promise<CallToolResult> {
         if (!this.storageSettings.values.searxng) {
             return createToolTextResult('Search failed. Inform the user: The SearXNG URL must be configured in the LLM Plugin settings.');
         }
 
         const searxngUrl = this.storageSettings.values.searxng;
-        const encodedQuery = encodeURIComponent(query);
-        const apiEndpoint = `${searxngUrl}?format=json&q=${encodedQuery}`;
+        const url = new URL(searxngUrl);
+        url.searchParams.set('q', query);
+        url.searchParams.set('format', 'json');
+        if (categories?.length) {
+            url.searchParams.set('categories', categories.join(','));
+        }
+        const apiEndpoint = url.toString();
 
         try {
             const response = await fetch(apiEndpoint);
@@ -104,15 +120,39 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
                 ],
             };
 
+            const filteredResults = data.results.filter(result => result.category === 'general' || result.category === 'news');
+
+            const suppressed = data.results.length - filteredResults.length;
+
             ret.structuredContent = {
-                results: data.results,
+                results: filteredResults,
             };
-            content.text = header + data.results.map((result, index) =>
+            content.text = header + filteredResults.map((result, index) =>
                 `
 ${index}. ${result.title}
     - ${result.url}
     - ${result.content}`
             ).join('\n');
+
+
+            if (suppressed) {
+                content.text += `
+
+## Note: ${suppressed} images were removed from the results and presented directly to the user.
+                `;
+
+                const presented = data.results.filter(result => result.category === 'images' && result.thumbnail_src).slice(0, 4);
+                if (presented.length) {
+                    ret._meta = {
+                        'chat.scrypted.app/': {
+                            images: presented.map(result => ({
+                                url: result.url,
+                                src: result.thumbnail_src,
+                            })),
+                        }
+                    };
+                }
+            }
 
             return ret;
         } catch (error) {
@@ -147,7 +187,7 @@ ${index}. ${result.title}
 
     async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === 'search-web') {
-            return await this.searchWeb(parameters.query);
+            return await this.searchWeb(parameters.query, parameters.categories);
         } else if (name === 'get-web-page-content') {
             return await this.getWebPageContent(parameters.url);
         }
