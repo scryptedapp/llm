@@ -313,7 +313,8 @@ export class ScryptedTools implements LLMTools {
                 return createToolTextResult(`${lightName} is not a valid light. Valid light names are: ${this.listLights()}`);
             if (!light.interfaces.includes(ScryptedInterface.Brightness))
                 return createToolTextResult(`${lightName} does not support brightness control.`);
-            await light.setBrightness(brightness);
+            // don't wait.
+            light.setBrightness(brightness);
             return createToolTextResult(`${lightName} brightness set to ${brightness}.`);
         }
         else if (name === 'list-notifiers') {
