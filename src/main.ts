@@ -336,6 +336,14 @@ async function llamaFork(providedPort: number, apiKey: string, model: string, ad
         await once(child_process.spawn('taskkill', ['/F', '/IM', 'llama-server.exe']), 'exit').catch(() => { });
     }
 
+    const env = process.env.SCRYPTED_INSTALL_ENVIRONMENT;
+    if (env?.includes('docker')) {
+        const flavor = process.env.SCRYPTED_DOCKER_FLAVOR;
+        if (!flavor?.includes('intel') && !flavor?.includes('nvidia')) {
+            sdk.log!.a('The llama.cpp server requires the intel or nvidia docker image. There may be stability and performance issues running on this image.');
+        }
+    }
+
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
     const llamaBinary = await downloadLLama();
 
@@ -616,7 +624,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
     }
 }
 
-class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler {
+export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler {
     devices = new Map<ScryptedNativeId, any>();
     userDatabases = new Map<string, {
         token: string,
@@ -877,8 +885,6 @@ class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCrea
         }
     }
 }
-
-export default LLMPlugin;
 
 export async function fork() {
     return {
