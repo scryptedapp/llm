@@ -273,11 +273,13 @@ export class ScryptedTools implements LLMTools {
             if (!light.interfaces.includes(ScryptedInterface.OnOff))
                 return createToolTextResult(`${lightName} does not support on/off control.`);
             if (name === 'turn-light-on') {
-                await light.turnOn();
+                // don't wait.
+                light.turnOn();
                 return createToolTextResult(`${lightName} turned on.`);
             }
             else if (name === 'turn-light-off') {
-                await light.turnOff();
+                // don't wait.
+                light.turnOff();
                 return createToolTextResult(`${lightName} turned off.`);
             }
         }
@@ -291,11 +293,13 @@ export class ScryptedTools implements LLMTools {
             if (!fan.interfaces.includes(ScryptedInterface.OnOff))
                 return createToolTextResult(`${fanName} does not support on/off control.`);
             if (name === 'turn-fan-on') {
-                await fan.turnOn();
+                // don't wait.
+                fan.turnOn();
                 return createToolTextResult(`${fanName} turned on.`);
             }
             else if (name === 'turn-fan-off') {
-                await fan.turnOff();
+                // don't wait.
+                fan.turnOff();
                 return createToolTextResult(`${fanName} turned off.`);
             }
         }
