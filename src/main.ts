@@ -291,6 +291,16 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
         });
 
         body.model ||= this.openaiSettings.values.model;
+        for (const message of body.messages) {
+            // some apis may send null values across, which chokes gemini up.
+            for (const k in message) {
+                // @ts-expect-error
+                if (message[k] === undefined || message[k] === null) {
+                    // @ts-expect-error
+                    delete message[k];
+                }
+            }
+        }
         const stream = client.chat.completions.stream(body);
         for await (const chunk of stream) {
             yield chunk;
