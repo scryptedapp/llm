@@ -43,14 +43,26 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
                                 "type": "string",
                                 "description": "The search query. Rather than using the user input directly, construct a good query for their intent to ensure good results.",
                             },
-                            "categories": {
-                                "type": "array",
-                                "items": {
-                                    "type": "string",
-                                    "enum": ["general", "news", "images", "videos"]
-                                },
-                                "description": "Optional array of search categories to filter results. The default category is general, and should typically be used. The query should guide which categories are relevant, if the user may want to see images of their query, include that category. The image and video results will not be returned as results, but will be presented to the user automatically."
-                            }
+                            "general": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "Whether to include general search results. This is the default category and should typically be used.",
+                            },
+                            "news": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether to include news search results. This is useful for queries that may have recent news articles.",
+                            },
+                            "images": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether to include image search results. The image results will not be returned as text results, but will be presented to the user automatically.",
+                            },
+                            "videos": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether to include video search results. The video results will not be returned as text results, but will be presented to the user automatically.",
+                            },
                         },
                         "required": [
                             "query",
@@ -82,7 +94,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         ]
     }
 
-    async searchWeb(query: string, categories?: string[]): Promise<CallToolResult> {
+    async searchWeb(query: string, general: boolean, news: boolean, images: boolean, videos: boolean): Promise<CallToolResult> {
         if (!this.storageSettings.values.searxng) {
             return createToolTextResult('Search failed. Inform the user: The SearXNG URL must be configured in the LLM Plugin settings.');
         }
@@ -91,6 +103,19 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         const url = new URL(searxngUrl);
         url.searchParams.set('q', query);
         url.searchParams.set('format', 'json');
+        const categories: string[] = [];
+        if (general) {
+            categories.push('general');
+        }
+        if (news) {
+            categories.push('news');
+        }
+        if (images) {
+            categories.push('images');
+        }
+        if (videos) {
+            categories.push('videos');
+        }
         if (categories?.length) {
             url.searchParams.set('categories', categories.join(','));
         }
@@ -187,7 +212,7 @@ ${index}. ${result.title}
 
     async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === 'search-web') {
-            return await this.searchWeb(parameters.query, parameters.categories);
+            return await this.searchWeb(parameters.query, parameters.general == undefined ? true : parameters.general, parameters.news, parameters.images, parameters.videos);
         } else if (name === 'get-web-page-content') {
             return await this.getWebPageContent(parameters.url);
         }
