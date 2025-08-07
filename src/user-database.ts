@@ -49,6 +49,10 @@ export class Database {
         return this.level.del(key);
     }
 
+    deleteAll(): Promise<void> {
+        return this.level.clear();
+    }
+
     async putProperty(key: string, property: string, value: any): Promise<void> {
         const str = await this.level.get(key) as string;
         const existingValue = JSON.parse(str) || {};
