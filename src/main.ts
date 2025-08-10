@@ -683,7 +683,7 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
             });
         }
 
-        if (!request.url?.startsWith('/endpoint/@scrypted/llm/public/token')) {
+        if (!request.url?.startsWith('/endpoint/@scrypted/llm/token')) {
             return response.send('', {
                 code: 404,
             });
@@ -720,7 +720,7 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         }
 
         response.send(JSON.stringify({
-            token: request.username,
+            token: userDatabase.token,
         }), {
             headers: {
                 'Content-Type': 'application/json',
