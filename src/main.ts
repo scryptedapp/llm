@@ -669,7 +669,8 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
     }
 
     async openDatabase(token: string): Promise<Database> {
-        const userDatabase = this.userDatabases.get(token);
+        // enumerate and find database
+        const userDatabase = Object.entries(this.userDatabases).find(([username, db]) => db.token === token)?.[1];
         if (!userDatabase) {
             throw new Error('User database not found for token: ' + token);
         }
