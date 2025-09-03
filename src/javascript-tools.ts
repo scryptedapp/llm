@@ -4,9 +4,9 @@ import { createToolTextResult, createUnknownToolError } from './tools-common';
 export const EvaluateJsToolFunctionName = 'evaluate-js';
 
 // Evaluates JavaScript code in a restricted browser context
-export function evaluateJs(code: string): CallToolResult {
+export async function evaluateJs(code: string): Promise<CallToolResult> {
     try {
-        const result = eval(code);
+        const result = await eval(code);
         if (typeof result === 'string') {
             return createToolTextResult(result);
         }
@@ -56,7 +56,7 @@ export class JavascriptTools implements LLMTools {
     async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === EvaluateJsToolFunctionName) {
             const { code } = parameters;
-            return evaluateJs(code);
+            return await evaluateJs(code);
         }
         throw createUnknownToolError(name);
     }
