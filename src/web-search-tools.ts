@@ -83,6 +83,11 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
                                 "type": "string",
                                 "description": "The URL of the web page to retrieve.",
                             },
+                            "htmlContent": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Returns the page as HTML content of the article rather than as plain text. HTML content will significantly slow down the request, so HTML content MUST NOT BE REQUESTED BY DEFAULT unless you need the hyperlink 'a' tag to retrieve more content from a referenced page.",
+                            },
                         },
                         "required": [
                             "url",
@@ -185,7 +190,7 @@ ${index}. ${result.title}
         }
     }
 
-    async getWebPageContent(url: string): Promise<CallToolResult> {
+    async getWebPageContent(url: string, htmlContent = false): Promise<CallToolResult> {
         try {
             const response = await fetch(url);
             const html = await response.text();
@@ -200,7 +205,7 @@ ${index}. ${result.title}
             const article = reader.parse();
 
             if (article) {
-                return createToolTextResult(`# URL: ${url}\n\n# Title: ${article.title}\n\n# Content: ${article.textContent}`);
+                return createToolTextResult(`# URL: ${url}\n\n# Title: ${article.title}\n\n# Content: ${htmlContent ? article.content : article.textContent}`);
 
             } else {
                 return createToolTextResult(`# URL: ${url}\n\nFailed to parse article`);
@@ -214,7 +219,7 @@ ${index}. ${result.title}
         if (name === 'search-web') {
             return await this.searchWeb(parameters.query, parameters.general == undefined ? true : parameters.general, parameters.news, parameters.images, parameters.videos);
         } else if (name === 'get-web-page-content') {
-            return await this.getWebPageContent(parameters.url);
+            return await this.getWebPageContent(parameters.url, parameters.htmlContent);
         }
         else if (name === TimeToolFunctionName) {
             // this call may be intercepted by the browser to provide a user locale time.
