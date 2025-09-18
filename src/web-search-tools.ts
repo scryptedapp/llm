@@ -159,7 +159,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
             };
             content.text = header + filteredResults.map((result, index) =>
                 `
-${index}. ${result.title}
+${index + 1}. ${result.title}
     - ${result.url}
     - ${result.content}`
             ).join('\n');
@@ -193,6 +193,12 @@ ${index}. ${result.title}
     async getWebPageContent(url: string, htmlContent = false): Promise<CallToolResult> {
         try {
             const response = await fetch(url);
+            if (response.headers.get('content-type')?.includes('application/pdf')) {
+                // do not send back pdfs.
+                response.body?.cancel().catch(() => { });
+                return createToolTextResult(`# URL: ${url}\n\nThe URL is a PDF document. Retrieving PDF documents is not supported.`);
+            }
+
             const html = await response.text();
 
             // Parse HTML into a DOM
