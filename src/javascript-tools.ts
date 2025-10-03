@@ -1,4 +1,4 @@
-import type { CallToolResult, LLMTools, ChatCompletionTool } from '@scrypted/types';
+import type { CallToolResult, ChatCompletionFunctionTool, LLMTools } from '@scrypted/types';
 import { createToolTextResult, createUnknownToolError } from './tools-common';
 
 export const EvaluateJsToolFunctionName = 'evaluate-js';
@@ -27,7 +27,7 @@ export async function evaluateJs(code: string): Promise<CallToolResult> {
     }
 }
 
-export function getEvaluateJsToolFunction(): ChatCompletionTool {
+export function getEvaluateJsToolFunction(): ChatCompletionFunctionTool {
     return {
         type: 'function',
         function: {
@@ -49,7 +49,7 @@ export function getEvaluateJsToolFunction(): ChatCompletionTool {
 }
 
 export class JavascriptTools implements LLMTools {
-    async getLLMTools(): Promise<ChatCompletionTool[]> {
+    async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         return [getEvaluateJsToolFunction()];
     }
 

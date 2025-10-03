@@ -1,4 +1,4 @@
-import type { ChatCompletionTool, CallToolResult } from '@scrypted/types';
+import type { CallToolResult, ChatCompletionFunctionTool } from '@scrypted/types';
 
 export const TimeToolFunctionName = 'get-time';
 
@@ -13,7 +13,7 @@ export function callGetTimeTool(): CallToolResult {
         ]
     }
 }
-export function getTimeToolFunction(): ChatCompletionTool {
+export function getTimeToolFunction(): ChatCompletionFunctionTool {
     return {
         type: 'function',
         function: {
