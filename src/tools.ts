@@ -1,4 +1,4 @@
-import type { Brightness, Camera, ChatCompletionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
 import { createToolTextImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
@@ -7,13 +7,13 @@ export class ScryptedTools implements LLMTools {
     constructor(public sdk: ScryptedStatic) {
     }
 
-    async getLLMTools(): Promise<ChatCompletionTool[]> {
+    async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         const listCameras = this.listCameras();
         const listLights = this.listLights();
         const listFans = this.listFans();
         const listNotifiers = this.listNotifiers();
 
-        const cams: ChatCompletionTool[] = [];
+        const cams: ChatCompletionFunctionTool[] = [];
         if (listCameras.length) {
             cams.push({
                 type: 'function',
@@ -37,7 +37,7 @@ export class ScryptedTools implements LLMTools {
             });
         }
 
-        const lights: ChatCompletionTool[] = [];
+        const lights: ChatCompletionFunctionTool[] = [];
         if (listLights.length) {
             lights.push(
                 {
@@ -109,7 +109,7 @@ export class ScryptedTools implements LLMTools {
             );
         }
 
-        const fans: ChatCompletionTool[] = [];
+        const fans: ChatCompletionFunctionTool[] = [];
         if (listFans.length) {
             fans.push(
                 {
@@ -155,7 +155,7 @@ export class ScryptedTools implements LLMTools {
             );
         }
 
-        const notifiers: ChatCompletionTool[] = [];
+        const notifiers: ChatCompletionFunctionTool[] = [];
         if (listNotifiers.length) {
             notifiers.push(
                 {

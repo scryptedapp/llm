@@ -1,6 +1,6 @@
 import type { CallToolResult, LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
-import type { ChatCompletionTool, ChatCompletionContentPartImage } from 'openai/resources';
+import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
 import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
 
@@ -34,7 +34,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
 
     const tools = Object.values(toolMap);
 
-    const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall) => {
+    const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall) => {
         const tool = map[toolCall.function.name];
         if (!tool)
             throw new Error(`Tool ${toolCall} not found.`);

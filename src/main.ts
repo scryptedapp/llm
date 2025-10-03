@@ -11,11 +11,11 @@ import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
+import { MCPServer } from './mcp-server';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
-import { MCPServer } from './mcp-server';
 
 const WebSearchToolsNativeId = 'search-tools';
 
@@ -107,6 +107,8 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 body.messages.push(message.choices[0].message);
                 // vllm freaks out if arguments is an empty string.
                 for (const tc of message.choices[0].message.tool_calls || []) {
+                    if (tc.type === 'custom') 
+                        throw new Error('Custom tool calls are not supported.');
                     if (tc.function)
                         tc.function.arguments ||= '{}';
                 }

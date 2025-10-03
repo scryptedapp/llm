@@ -1,5 +1,5 @@
 import { Readability } from '@mozilla/readability';
-import { CallToolResult, ChatCompletionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue, TextContent, TextResourceContents } from '@scrypted/sdk';
+import { CallToolResult, ChatCompletionFunctionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue, TextContent } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import type { JSDOM as JSDOMType } from 'jsdom';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from './time-tool';
@@ -28,7 +28,7 @@ export class WebSearchTools extends ScryptedDeviceBase implements LLMTools, Sett
         }
     });
 
-    async getLLMTools(): Promise<ChatCompletionTool[]> {
+    async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         return [
             getTimeToolFunction(),
             {
