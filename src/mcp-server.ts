@@ -1,6 +1,6 @@
-import { LLMTools, ChatCompletionTool, ScryptedDeviceBase, Settings, SettingValue, CallToolResult } from "@scrypted/sdk";
-import { StorageSettings } from "@scrypted/sdk/storage-settings";
 import type { Client as ClientType } from "@modelcontextprotocol/sdk/client/index.js";
+import { CallToolResult, ChatCompletionFunctionTool, LLMTools, ScryptedDeviceBase, Settings, SettingValue } from "@scrypted/sdk";
+import { StorageSettings } from "@scrypted/sdk/storage-settings";
 
 export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings {
     storageSettings = new StorageSettings(this, {
@@ -65,7 +65,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
         }
     }
 
-    async getLLMTools(): Promise<ChatCompletionTool[]> {
+    async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         await this.ensureClientConnected();
         const tools = await this.client!.listTools();
         return tools.tools.map(tool => ({

@@ -192,7 +192,14 @@ ${index + 1}. ${result.title}
 
     async getWebPageContent(url: string, htmlContent = false): Promise<CallToolResult> {
         try {
-            const response = await fetch(url);
+            const options = {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                }
+            };
+
+            const response = await fetch(url, options);
             if (response.headers.get('content-type')?.includes('application/pdf')) {
                 // do not send back pdfs.
                 response.body?.cancel().catch(() => { });
