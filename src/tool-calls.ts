@@ -1,4 +1,4 @@
-import type { CallToolResult, LLMTools } from "@scrypted/types";
+import type { CallToolResult, ChatCompletionCapabilities, LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
 import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
@@ -51,7 +51,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     };
 }
 
-export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, assistantUsesFunctionCalls: boolean, callingTool?: (tc: ParsedFunctionToolCall) => void) {
+export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void) {
     if (!message.tool_calls)
         throw new Error('Message does not contain tool calls.');
 
@@ -78,30 +78,47 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
 
         for (const content of response.content) {
             if (content.type === 'image') {
-                messages.messages.push({
-                    role: 'tool',
-                    tool_call_id: tc.id,
-                    content: 'The next user message will include the image.',
-                });
-                messages.messages.push({
-                    role: 'assistant',
-                    content: 'Ok.',
-                });
-
-                // create a base 64 data url
                 const url = `data:${content.mimeType};base64,${content.data}`;
-                const image: ChatCompletionContentPartImage = {
-                    type: 'image_url',
-                    image_url: {
-                        url,
-                    },
-                };
-                messages.messages.push({
-                    role: 'user',
-                    content: [
-                        image,
-                    ],
-                });
+                if (capabilities?.image) {
+                    messages.messages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id,
+                        content: 'The next user message will include the image.',
+                    });
+                    messages.messages.push({
+                        role: 'assistant',
+                        content: 'Ok.',
+                    });
+
+                    // create a base 64 data url
+                    const image: ChatCompletionContentPartImage = {
+                        type: 'image_url',
+                        image_url: {
+                            url,
+                        },
+                    };
+                    messages.messages.push({
+                        role: 'user',
+                        content: [
+                            image,
+                        ],
+                    });
+                }
+                else {
+                    messages.messages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id,
+                        content: 'The image was generated and presented to the user.',
+                    });
+                    messages.callToolResult._meta ||= {};
+                    const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                    meta.images ||= [];
+                    meta.images.push({
+                        src: url,
+                        width: '100%',
+                        height: 'auto',
+                    });
+                }
             }
             else if (content.type === 'text') {
                 messages.messages.push({
