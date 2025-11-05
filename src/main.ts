@@ -1,5 +1,5 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import type { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
 import sdk, { HttpRequestHandler, ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
@@ -177,6 +177,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
 
         using userMessageQueue = createAsyncQueue<ChatCompletionMessageParam[]>();
         let printedName = false;
+        const toolHistory: CallToolResult[] = [];
 
         (async () => {
             try {
@@ -212,11 +213,13 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         continue;
                     }
 
-                    const allMessages = await handleToolCalls(tools, message, this.functionCalls, this.chatCompletionCapabilities, tc => {
+                    const allMessages = await handleToolCalls(tools, message, toolHistory, this.functionCalls, this.chatCompletionCapabilities, tc => {
                         q.submit(Buffer.from(`\n\n${this.name}:\n\nCalling tool: ${tc.function.name} - ${tc.function.arguments}\n\n`));
                     });
 
                     for (const toolMessage of allMessages) {
+                        if (toolMessage.callToolResult)
+                            toolHistory.push(toolMessage.callToolResult);
                         userMessageQueue.submit(toolMessage.messages);
                     }
                 }

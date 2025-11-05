@@ -1,8 +1,9 @@
 import type { CallToolResult, ChatCompletionCapabilities, LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
-import type { ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
+import type { ParsedChatCompletionMessage, ChatCompletionMessageParam, ParsedFunctionToolCall, ChatCompletionFunctionTool } from "openai/resources/chat/completions";
 import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
+import { generate } from 'random-words';
 
 export async function prepareTools(allLLMTools: LLMTools[]) {
     const toolsPromises = allLLMTools.map(async llmTools => {
@@ -51,7 +52,21 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     };
 }
 
-export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void) {
+function findChatBlob(token: string, history: CallToolResult[]) {
+    // find the tool call that has a meta with the chat url
+    for (const message of history) {
+        const images = (message._meta?.['chat.scrypted.app/'] as any)?.images;
+        if (!images)
+            continue;
+        for (const image of images) {
+            if (image.token === token) {
+                return image.src;
+            }
+        }
+    }
+}
+
+export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, toolHistory: CallToolResult[], assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void) {
     if (!message.tool_calls)
         throw new Error('Message does not contain tool calls.');
 
@@ -62,7 +77,33 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
     };
     const allMessages: ToolCallData[] = [];
 
-    for (const tc of message.tool_calls) {
+    for (const _tc of message.tool_calls) {
+        let tc = JSON.parse(JSON.stringify(_tc)) as ParsedFunctionToolCall;
+
+        const tool = tools.tools.find(t => t.type === 'function' && t.function.name === tc.function.name) as ChatCompletionFunctionTool;
+        try {
+            if (tool && tc.function.arguments && tool.function.parameters) {
+                const parsed = JSON.parse(tc.function.arguments);
+                for (const [param, paramType] of Object.entries(tool.function.parameters.properties as any)) {
+                    const value = parsed[param];
+                    if (typeof value !== 'string')
+                        continue;
+                    const schemaValue = paramType as any;
+                    if (schemaValue.type === 'string' && schemaValue.format === 'uri') {
+                        if (value.startsWith('chat://')) {
+                            const src = findChatBlob(new URL(value).host, toolHistory);
+                            if (src) {
+                               parsed[param] = src;
+                               tc.function.arguments = JSON.stringify(parsed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (e){ 
+        }
+
         callingTool?.(tc);
         const response = await tools.toolCall(tc);
 
@@ -105,15 +146,17 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     });
                 }
                 else {
+                    const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
                     messages.messages.push({
                         role: 'tool',
                         tool_call_id: tc.id,
-                        content: 'The image was generated and presented to the user.',
+                        content: `The image was presented to the user. The image can be used in other tools using the following URL: \`chat://${token}\`.`,
                     });
                     messages.callToolResult._meta ||= {};
                     const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.images ||= [];
                     meta.images.push({
+                        token,
                         src: url,
                         width: '100%',
                         height: 'auto',
