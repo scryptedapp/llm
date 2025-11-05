@@ -1,9 +1,9 @@
 import type { CallToolResult, ChatCompletionCapabilities, LLMTools } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
-import type { ParsedChatCompletionMessage, ChatCompletionMessageParam, ParsedFunctionToolCall, ChatCompletionFunctionTool } from "openai/resources/chat/completions";
-import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
+import type { ChatCompletionFunctionTool, ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 import { generate } from 'random-words';
+import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
 
 export async function prepareTools(allLLMTools: LLMTools[]) {
     const toolsPromises = allLLMTools.map(async llmTools => {
