@@ -194,12 +194,13 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 }, userMessageQueue.queue)) {
                     lastAssistantMessage = token as any;
                     if (token.object === 'chat.completion.chunk') {
-                        if (token.choices[0].delta.content) {
+                        const content = token.choices[0].delta.content || token.choices[0].delta.reasoning_content;
+                        if (content) {
                             if (!printedName) {
                                 printedName = true;
                                 q.submit(Buffer.from(`\n\n${this.name}:\n\n`));
                             }
-                            q.submit(Buffer.from(token.choices[0].delta.content));
+                            q.submit(Buffer.from(content));
                         }
                         continue;
                     }
