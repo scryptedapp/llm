@@ -55,12 +55,27 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
 function findChatBlob(token: string, history: CallToolResult[]) {
     // find the tool call that has a meta with the chat url
     for (const message of history) {
-        const images = (message._meta?.['chat.scrypted.app/'] as any)?.images;
-        if (!images)
+        const meta = (message._meta?.['chat.scrypted.app/'] as any);
+        if (!meta)
             continue;
-        for (const image of images) {
-            if (image.token === token) {
-                return image.src;
+        
+        // Check images
+        const images = meta.images;
+        if (images) {
+            for (const image of images) {
+                if (image.token === token) {
+                    return image.src;
+                }
+            }
+        }
+        
+        // Check audio
+        const audio = meta.audio;
+        if (audio) {
+            for (const audioFile of audio) {
+                if (audioFile.token === token) {
+                    return audioFile.src;
+                }
             }
         }
     }
@@ -160,6 +175,51 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         src: url,
                         width: '100%',
                         height: 'auto',
+                    });
+                }
+            }
+            else if (content.type === 'audio') {
+                const url = `data:${content.mimeType};base64,${content.data}`;
+                if (capabilities?.audio) {
+                    messages.messages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id,
+                        content: 'The next user message will include the audio.',
+                    });
+                    messages.messages.push({
+                        role: 'assistant',
+                        content: 'Ok.',
+                    });
+
+                    // Note: OpenAI doesn't have ChatCompletionContentPartAudio type yet,
+                    // so we'll handle this similarly to when audio capability is not available
+                    const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
+                    messages.messages.push({
+                        role: 'user',
+                        content: `Audio file is available at: \`chat://${token}\``,
+                    });
+                    
+                    messages.callToolResult._meta ||= {};
+                    const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                    meta.audio ||= [];
+                    meta.audio.push({
+                        token,
+                        src: url,
+                    });
+                }
+                else {
+                    const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
+                    messages.messages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id,
+                        content: `The audio was presented to the user. The audio can be used in other tools using the following URL: \`chat://${token}\`.`,
+                    });
+                    messages.callToolResult._meta ||= {};
+                    const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                    meta.audio ||= [];
+                    meta.audio.push({
+                        token,
+                        src: url,
                     });
                 }
             }
