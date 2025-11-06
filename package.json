@@ -27,12 +27,14 @@
    },
    "scrypted": {
       "rollup": true,
-      "name": "llm",
+      "name": "Large Language Model Plugin",
       "type": "LLM",
       "interfaces": [
          "DeviceProvider",
          "DeviceCreator",
          "HttpRequestHandler",
+         "EngineIOHandler",
+         "MixinProvider",
          "UserDatabase"
       ],
       "interfaceDescriptors": {
@@ -47,7 +49,7 @@
    },
    "dependencies": {
       "@scrypted/deferred": "^0.0.8",
-      "@scrypted/sdk": "^0.5.48",
+      "@scrypted/sdk": "^0.5.50",
       "@scrypted/types": "^0.5.45",
       "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",

@@ -1,5 +1,5 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import type { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, OnOff, ScryptedNativeId, Setting, Settings, StreamService, TTY } from '@scrypted/sdk';
+import { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceType, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
 import sdk, { HttpRequestHandler, ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
@@ -16,6 +16,7 @@ import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
+import { LLMUserMixin } from './llm-user';
 
 const WebSearchToolsNativeId = 'search-tools';
 
@@ -107,7 +108,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 body.messages.push(message.choices[0].message);
                 // vllm freaks out if arguments is an empty string.
                 for (const tc of message.choices[0].message.tool_calls || []) {
-                    if (tc.type === 'custom') 
+                    if (tc.type === 'custom')
                         throw new Error('Custom tool calls are not supported.');
                     if (tc.function)
                         tc.function.arguments ||= '{}';
@@ -639,7 +640,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
     }
 }
 
-export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler {
+export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler, MixinProvider {
     devices = new Map<ScryptedNativeId, any>();
     userDatabases = new Map<string, {
         token: string,
@@ -671,6 +672,30 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         });
 
         this.updateCors();
+    }
+
+    async getMixin(mixinDevice: any, mixinDeviceInterfaces: ScryptedInterface[], mixinDeviceState: WritableDeviceState): Promise<any> {
+        return new LLMUserMixin(this, {
+            group: 'LLM Permissions',
+            groupKey: 'llm',
+            mixinProviderNativeId: this.nativeId,
+            mixinDevice,
+            mixinDeviceState,
+            mixinDeviceInterfaces
+        });
+    }
+
+    async canMixin(type: ScryptedDeviceType | string, interfaces: string[]): Promise<string[] | null | undefined | void> {
+        if (type === ScryptedDeviceType.Person && interfaces.includes(ScryptedInterface.ScryptedUser)) {
+            return [
+                ScryptedInterface.ScryptedUser,
+                ScryptedInterface.Settings,
+            ];
+        }
+    }
+
+    async releaseMixin(id: string, mixinDevice: any): Promise<void> {
+        
     }
 
     async openDatabase(token: string): Promise<Database> {
