@@ -1,10 +1,19 @@
-import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, OnOff, ScryptedStatic, ObjectDetection, MediaObject } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
 import { createToolTextImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
 
 export class ScryptedTools implements LLMTools {
+    objectDetector: ObjectDetection;
+
     constructor(public sdk: ScryptedStatic) {
+        // Find object detector using || approach
+        this.objectDetector =
+            sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/nvr', 'detection') ||
+            sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/coreml') ||
+            sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/openvino') ||
+            sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/onnx') ||
+            sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/tensorflow-lite');
     }
 
     async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
@@ -198,7 +207,32 @@ export class ScryptedTools implements LLMTools {
                 });
         }
 
-        return [...cams, ...lights, ...fans, ...notifiers, getTimeToolFunction()];
+        const objectDetectors: ChatCompletionFunctionTool[] = [];
+        if (this.objectDetector) {
+            objectDetectors.push({
+                type: 'function',
+                function: {
+                    name: 'detect-objects',
+                    description: `Perform object detection on an image. Returns a list of detected objects with their labels and confidence scores.`,
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "image": {
+                                "type": "string",
+                                "format": "uri",
+                                "description": "Base64 encoded image data URL to perform object detection on.",
+                            },
+                        },
+                        "required": [
+                            "image",
+                        ],
+                        "additionalProperties": false
+                    },
+                },
+            });
+        }
+
+        return [...cams, ...lights, ...fans, ...notifiers, ...objectDetectors, getTimeToolFunction()];
     }
 
     listLights() {
@@ -333,6 +367,42 @@ export class ScryptedTools implements LLMTools {
                 return createToolTextResult(`${notifierName} is not a valid notifier. Valid notifiers are: ${this.listNotifiers()}`);
             await notifier.sendNotification(message);
             return createToolTextResult(`Notification sent to ${notifier.id}: ${notifier.name}.`);
+        }
+        else if (name === 'detect-objects') {
+            const imageData = parameters.image;
+            if (!imageData)
+                return createToolTextResult(`"image" parameter is required for detect-objects tool.`);
+
+            // Use the pre-initialized object detector
+            const objectDetector = this.objectDetector;
+            if (!objectDetector)
+                return createToolTextResult(`No object detection devices found.`);
+
+            // Convert base64 image data to buffer
+            // Handle data URL format if present
+            let base64Data = imageData;
+            if (imageData.startsWith('data:image')) {
+                base64Data = imageData.split(',')[1];
+            }
+
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+
+            // Create media object from buffer
+            const mediaObject = await this.sdk.mediaManager.createMediaObject(imageBuffer, 'image/jpeg');
+
+            // Perform object detection
+            const detectionResult = await objectDetector.detectObjects(mediaObject);
+
+            // Format the results
+            if (!detectionResult.detections || detectionResult.detections.length === 0) {
+                return createToolTextResult(`No objects detected in the image.`);
+            }
+
+            const detectionText = detectionResult.detections
+                .map(detection => `${detection.className} (${(detection.score * 100).toFixed(1)}%)`)
+                .join(', ');
+
+            return createToolTextResult(`Detected objects: ${detectionText}`);
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();
