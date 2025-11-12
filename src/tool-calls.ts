@@ -132,15 +132,20 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
         // tool calls cant return images, so fake it out by having the tool respond
         // that the next user message will include the image and the assistant respond ok.
 
+        const messageStrings: string[] = [];
+        const responseMessage: OpenAI.Chat.Completions.ChatCompletionToolMessageParam = {
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: '',
+        };
+
+        messages.messages.push(responseMessage);
+
         for (const content of response.content) {
             if (content.type === 'image') {
                 const url = `data:${content.mimeType};base64,${content.data}`;
                 if (capabilities?.image) {
-                    messages.messages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: 'The next user message will include the image.',
-                    });
+                    messageStrings.push('The next user message will include the image.');
                     messages.messages.push({
                         role: 'assistant',
                         content: 'Ok.',
@@ -156,17 +161,17 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     messages.messages.push({
                         role: 'user',
                         content: [
+                            {
+                                type: 'text',
+                                text: `Image file from tool call id ${tc.id}:`,
+                            },
                             image,
                         ],
                     });
                 }
                 else {
                     const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
-                    messages.messages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: `The image was presented to the user. The image can be used in other tools using the following URL: \`chat://${token}\`.`,
-                    });
+                    messageStrings.push(`The image was presented to the user. The image can be used in other tools using the following URL: \`chat://${token}\`.`);
                     messages.callToolResult._meta ||= {};
                     const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.images ||= [];
@@ -181,11 +186,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
             else if (content.type === 'audio') {
                 const url = `data:${content.mimeType};base64,${content.data}`;
                 if (capabilities?.audio) {
-                    messages.messages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: 'The next user message will include the audio.',
-                    });
+                    messageStrings.push('The next user message will include the audio.');
                     messages.messages.push({
                         role: 'assistant',
                         content: 'Ok.',
@@ -209,11 +210,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                 }
                 else {
                     const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
-                    messages.messages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: `The audio was presented to the user. The audio can be used in other tools using the following URL: \`chat://${token}\`.`,
-                    });
+                    messageStrings.push(`The audio was presented to the user. The audio can be used in other tools using the following URL: \`chat://${token}\`.`);
                     messages.callToolResult._meta ||= {};
                     const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.audio ||= [];
@@ -224,16 +221,14 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                 }
             }
             else if (content.type === 'text') {
-                messages.messages.push({
-                    role: 'tool',
-                    tool_call_id: tc.id,
-                    content: content.text,
-                });
+                messageStrings.push(content.text);
             }
             else {
                 throw new Error(`Unsupported content type ${content.type} in tool call response.`);
             }
         }
+
+        responseMessage.content = messageStrings.join('\n');
 
         if (assistantUsesFunctionCalls) {
             message.function_call = {

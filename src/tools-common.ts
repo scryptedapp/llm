@@ -23,7 +23,7 @@ export function createToolTextResult(text: string): CallToolResult {
     };
 }
 
-export function createToolTextImageResult(base64Data: string, mimeType = 'image/jpeg'): CallToolResult {
+export function createToolImageResult(base64Data: string, mimeType = 'image/jpeg'): CallToolResult {
     return {
         content: [
             {
@@ -31,6 +31,21 @@ export function createToolTextImageResult(base64Data: string, mimeType = 'image/
                 data: base64Data,
                 mimeType,
             },
+        ],
+    };
+}
+export function createToolTextAndImageResult(text: string, base64Data: string, mimeType = 'image/jpeg'): CallToolResult {
+    return {
+        content: [
+            {
+                type: 'image',
+                data: base64Data,
+                mimeType,
+            },
+            {
+                type: 'text',
+                text,
+            }
         ],
     };
 }

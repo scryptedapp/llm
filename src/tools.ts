@@ -1,7 +1,7 @@
-import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, CallToolResult, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
-import { createToolTextImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
+import { createToolImageResult, createToolTextAndImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
 
 export class ScryptedTools implements LLMTools {
     objectDetector: ObjectDetection;
@@ -125,6 +125,30 @@ export class ScryptedTools implements LLMTools {
 
         return base64String;
 
+    }
+
+    /**
+     * Adds image data to the meta field of a CallToolResult
+     * @param result The CallToolResult to modify
+     * @param base64Image The base64 encoded image data
+     */
+    private addImageMeta(result: CallToolResult, base64Image: string): void {
+        if (!result._meta) {
+            result._meta = {};
+        }
+
+        const meta = result._meta as any;
+        const appMeta = meta['chat.scrypted.app/'] || (meta['chat.scrypted.app/'] = {});
+
+        if (!appMeta.images) {
+            appMeta.images = [];
+        }
+
+        appMeta.images.push({
+            src: `data:image/jpeg;base64,${base64Image}`,
+            width: '100%',
+            height: 'auto'
+        });
     }
 
     async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
@@ -406,7 +430,9 @@ export class ScryptedTools implements LLMTools {
                 return createToolTextResult(`${cameraName} is not a valid camera. Valid camera names are: ${this.listCameras()}`);
             const picture = await camera.takePicture();
             const buffer = await sdk.mediaManager.convertMediaObjectToBuffer(picture, 'image/jpeg');
-            return createToolTextImageResult(buffer.toString('base64'));
+
+            // Return text result with image in meta field
+            return createToolImageResult(buffer.toString('base64'));
         }
         else if (name === 'turn-light-on' || name === 'turn-light-off') {
             const lightName = parameters.light;
@@ -513,29 +539,17 @@ export class ScryptedTools implements LLMTools {
                 .map(detection => `${detection.className} (${(detection.score * 100).toFixed(1)}%)`)
                 .join(', ');
 
-            const ret = createToolTextResult(`Detected objects: ${detectionText}`);
 
             // Create annotated image with bounding boxes
             try {
                 const annotatedImageBase64 = await this.createAnnotatedImage(imageBuffer, detectionResult.detections);
-
-                // Return text result with annotated image in meta field
-                ret._meta = {
-                    'chat.scrypted.app/': {
-                        images: [
-                            {
-                                src: `data:image/jpeg;base64,${annotatedImageBase64}`,
-                                width: '100%',
-                                height: 'auto'
-                            }
-                        ]
-                    }
-                };
-            } catch (error) {
+                return createToolTextAndImageResult(`Detected objects: ${detectionText}`, annotatedImageBase64);
+            }
+            catch (error) {
                 // Fallback to text-only result if image annotation fails
                 console.error('Failed to create annotated image:', error);
+                return createToolTextResult(`Detected objects: ${detectionText}`);
             }
-            return ret;
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();
