@@ -1,4 +1,4 @@
-import type { Brightness, CallToolResult, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
 import { createToolImageResult, createToolTextAndImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
@@ -125,30 +125,6 @@ export class ScryptedTools implements LLMTools {
 
         return base64String;
 
-    }
-
-    /**
-     * Adds image data to the meta field of a CallToolResult
-     * @param result The CallToolResult to modify
-     * @param base64Image The base64 encoded image data
-     */
-    private addImageMeta(result: CallToolResult, base64Image: string): void {
-        if (!result._meta) {
-            result._meta = {};
-        }
-
-        const meta = result._meta as any;
-        const appMeta = meta['chat.scrypted.app/'] || (meta['chat.scrypted.app/'] = {});
-
-        if (!appMeta.images) {
-            appMeta.images = [];
-        }
-
-        appMeta.images.push({
-            src: `data:image/jpeg;base64,${base64Image}`,
-            width: '100%',
-            height: 'auto'
-        });
     }
 
     async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
