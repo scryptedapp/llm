@@ -404,7 +404,9 @@ export class ScryptedTools implements LLMTools {
             const camera = sdk.systemManager.getDeviceByName<Camera>(cameraName);
             if (!camera || !camera.interfaces.includes(ScryptedInterface.Camera))
                 return createToolTextResult(`${cameraName} is not a valid camera. Valid camera names are: ${this.listCameras()}`);
-            const picture = await camera.takePicture();
+            const picture = await camera.takePicture({
+                reason: 'event',
+            });
             const buffer = await sdk.mediaManager.convertMediaObjectToBuffer(picture, 'image/jpeg');
 
             // Return text result with image in meta field
