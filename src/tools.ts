@@ -116,7 +116,7 @@ export class ScryptedTools implements LLMTools {
         }
 
         // Convert canvas to base64 JPEG
-        const blobResult = await canvas.convertToBlob({ type: 'image/jpeg' });
+        const blobResult = await canvas.convertToBlob({ type: 'image/jpeg', quality: 99 });
         const arrayBuffer = await blobResult.arrayBuffer();
         const base64String = Buffer.from(arrayBuffer).toString('base64');
 
