@@ -16,6 +16,117 @@ export class ScryptedTools implements LLMTools {
             sdk.systemManager.getDeviceById<ObjectDetection>('@scrypted/tensorflow-lite');
     }
 
+    /**
+     * Creates an annotated image with bounding boxes drawn around detected objects
+     * @param imageBuffer The original image buffer
+     * @param detections Array of detected objects with bounding box information
+     * @returns Base64 encoded JPEG image with bounding boxes
+     */
+    private async createAnnotatedImage(imageBuffer: Buffer, detections: any[]): Promise<string> {
+        // Create an image blob from the buffer
+        const blob = new Blob([imageBuffer as any], { type: 'image/jpeg' });
+        const imageUrl = URL.createObjectURL(blob);
+
+        // Create an image element to load the image
+        const img = new Image();
+        img.src = imageUrl;
+
+        // Wait for the image to load
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+
+        // Create an OffscreenCanvas with the same dimensions as the image
+        const canvas = new OffscreenCanvas(img.width, img.height);
+        const ctx = canvas.getContext('2d')!;
+
+        // Draw the original image on the canvas
+        ctx.drawImage(img, 0, 0);
+
+        // Set up styling for bounding boxes
+        ctx.strokeStyle = '#00FF00'; // Green color for bounding boxes
+        ctx.lineWidth = 2;
+        ctx.fillStyle = '#00FF00'; // Green color for text
+        ctx.font = '16px Arial';
+
+        // Draw bounding boxes for each detection
+        for (const detection of detections) {
+            // Extract bounding box coordinates from ObjectDetectionResult
+            // Format: [x, y, width, height] where values are normalized (0-1)
+            let x, y, width, height;
+
+            if (detection.boundingBox) {
+                // Format from SDK: [x, y, width, height] (in pixels)
+                x = detection.boundingBox[0];
+                y = detection.boundingBox[1];
+                width = detection.boundingBox[2];
+                height = detection.boundingBox[3];
+            } else {
+                // Try alternative formats for compatibility
+                if (detection.bbox) {
+                    // Format: { x, y, width, height } (in pixels)
+                    x = detection.bbox.x;
+                    y = detection.bbox.y;
+                    width = detection.bbox.width;
+                    height = detection.bbox.height;
+                } else if (detection.xmin !== undefined) {
+                    // Format: { xmin, ymin, xmax, ymax } (in pixels)
+                    x = detection.xmin;
+                    y = detection.ymin;
+                    width = detection.xmax - detection.xmin;
+                    height = detection.ymax - detection.ymin;
+                } else if (detection.box) {
+                    // Format: { box: { x, y, width, height } } (in pixels)
+                    if (detection.box.x !== undefined) {
+                        x = detection.box.x;
+                        y = detection.box.y;
+                        width = detection.box.width;
+                        height = detection.box.height;
+                    } else if (detection.box.xmin !== undefined) {
+                        // Format: { box: { xmin, ymin, xmax, ymax } } (in pixels)
+                        x = detection.box.xmin;
+                        y = detection.box.ymin;
+                        width = detection.box.xmax - detection.box.xmin;
+                        height = detection.box.ymax - detection.box.ymin;
+                    } else {
+                        // Skip this detection if we can't parse the bounding box
+                        console.warn('Could not parse bounding box for detection:', detection);
+                        continue;
+                    }
+                } else {
+                    // Skip this detection if we can't parse the bounding box
+                    console.warn('Could not parse bounding box for detection:', detection);
+                    continue;
+                }
+            }
+
+            // Draw bounding box rectangle
+            ctx.strokeRect(x, y, width, height);
+
+            // Draw label background
+            const label = `${detection.className} ${(detection.score * 100).toFixed(1)}%`;
+            const textMetrics = ctx.measureText(label);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.7)'; // Semi-transparent green
+            ctx.fillRect(x, y - 20, textMetrics.width + 10, 20);
+
+            // Draw label text
+            ctx.fillStyle = '#000000'; // Black text
+            ctx.fillText(label, x + 5, y - 5);
+        }
+
+        // Convert canvas to base64 JPEG
+        const blobResult = await canvas.convertToBlob({ type: 'image/jpeg' });
+        const arrayBuffer = await blobResult.arrayBuffer();
+        const base64String = Buffer.from(arrayBuffer).toString('base64');
+
+        // Clean up the object URL
+        URL.revokeObjectURL(imageUrl);
+
+        return base64String;
+
+    }
+
     async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         const listCameras = this.listCameras();
         const listLights = this.listLights();
@@ -402,7 +513,29 @@ export class ScryptedTools implements LLMTools {
                 .map(detection => `${detection.className} (${(detection.score * 100).toFixed(1)}%)`)
                 .join(', ');
 
-            return createToolTextResult(`Detected objects: ${detectionText}`);
+            const ret = createToolTextResult(`Detected objects: ${detectionText}`);
+
+            // Create annotated image with bounding boxes
+            try {
+                const annotatedImageBase64 = await this.createAnnotatedImage(imageBuffer, detectionResult.detections);
+
+                // Return text result with annotated image in meta field
+                ret._meta = {
+                    'chat.scrypted.app/': {
+                        images: [
+                            {
+                                src: `data:image/jpeg;base64,${annotatedImageBase64}`,
+                                width: '100%',
+                                height: 'auto'
+                            }
+                        ]
+                    }
+                };
+            } catch (error) {
+                // Fallback to text-only result if image annotation fails
+                console.error('Failed to create annotated image:', error);
+            }
+            return ret;
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();

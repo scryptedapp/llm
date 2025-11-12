@@ -62,7 +62,7 @@
       "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
       "@types/jsdom": "^21.1.7",
-      "@types/node": "^24.1.0"
+      "@types/node": "^22.19.1"
    },
    "optionalDependencies": {
       "@modelcontextprotocol/sdk": "^1.17.0",
