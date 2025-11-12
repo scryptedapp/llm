@@ -1,4 +1,4 @@
-import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, OnOff, ScryptedStatic, ObjectDetection, MediaObject } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
 import { createToolTextImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
