@@ -103,13 +103,15 @@ export class LLMUserMixin extends SettingsMixinDeviceBase<ScryptedUser> implemen
             ),
         ]);
 
-        ret.devicesAccessControls!.push({
-            id: sdk.systemManager.getDeviceById('@scrypted/llm').id,
-            interfaces: ["UserDatabase"],
-            methods: [
-                "openDatabase",
-            ]
-        });
+        mergeDeviceAccessControls(ret, [
+            {
+                id: sdk.systemManager.getDeviceById('@scrypted/llm').id,
+                interfaces: ["UserDatabase"],
+                methods: [
+                    "openDatabase",
+                ]
+            }
+        ]);
 
         let llms = this.storageSettings.values.llms as string[];
         if (this.storageSettings.values.accessAllLLMs === 'Access All LLMs') {
