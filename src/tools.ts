@@ -332,6 +332,7 @@ export class ScryptedTools implements LLMTools {
                                 "type": "string",
                                 "format": "uri",
                                 "description": "Base64 encoded image data URL to perform object detection on.",
+                                "mimeType": "image/jpeg",
                             },
                         },
                         "required": [

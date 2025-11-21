@@ -52,7 +52,13 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     };
 }
 
-export function findChatBlob(token: string, history: CallToolResult[]) {
+class InvalidBlobMimeTypeError extends Error {
+    constructor(expected: string, actual: string) {
+        super(`Tool call failed. The tool expected url with mime type ${expected}, but got ${actual}`);
+    }
+}
+
+export function findChatBlob(token: string, history: CallToolResult[], requiredMimeType?: string) {
     // find the tool call that has a meta with the chat url
     for (const message of history) {
         const meta = (message._meta?.['chat.scrypted.app/'] as any);
@@ -84,6 +90,9 @@ export function findChatBlob(token: string, history: CallToolResult[]) {
             for (const resource of resources) {
                 if (resource.token === token) {
                     const text = resource.text;
+                    if (requiredMimeType && resource.mimeType !== requiredMimeType) {
+                        throw new InvalidBlobMimeTypeError(requiredMimeType, resource.mimeType);
+                    }
                     if (resource.mimeType === 'application/json') {
                         try {
                             return JSON.parse(text);
@@ -123,7 +132,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     const schemaValue = paramType as any;
                     if (schemaValue.type === 'string' && schemaValue.format === 'uri') {
                         if (value.startsWith('chat://')) {
-                            const src = findChatBlob(new URL(value).host, toolHistory);
+                            const src = findChatBlob(new URL(value).host, toolHistory, schemaValue.mimeType);
                             if (src) {
                                 parsed[param] = src;
                                 tc.function.arguments = JSON.stringify(parsed);
