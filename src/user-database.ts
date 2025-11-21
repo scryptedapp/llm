@@ -15,33 +15,69 @@ export class Database {
     async sublevel(sublevelName: string): Promise<Database> {
         return new Database(this.level.sublevel(sublevelName));
     }
+    private async _iterate<V>(
+        filterFn: (value: any) => boolean,
+        properties?: string[]
+    ): Promise<{ key: string; value: Partial<V> }[]> {
+        const result: { key: string; value: Partial<V> }[] = [];
+        
+        for await (const [key, str] of this.level.iterator()) {
+            const value = await JSON.parse(str);
+            
+            // Apply filter function
+            if (!filterFn(value)) {
+                continue;
+            }
+            
+            // Apply property filtering if specified
+            if (properties?.length) {
+                const filteredValue: Partial<V> = {};
+                for (const property of properties) {
+                    if (value[property] !== undefined) {
+                        filteredValue[property as keyof V] = value[property];
+                    }
+                }
+                result.push({ key, value: filteredValue });
+            } else {
+                result.push({ key, value });
+            }
+        }
+        
+        return result;
+    }
+    
     async getAll<V>(options?: {
         properties?: string[];
     }): Promise<{
         key: string,
         value: Partial<V>,
     }[]> {
-        const result: ({
-            key: string,
-            value: Partial<V>
-        })[] = [];
-        for await (const [key, str] of this.level.iterator()) {
-            const value = await JSON.parse(str);
-            if (options?.properties?.length) {
-                const filteredValue: Partial<V> = {};
-                for (const property of options.properties) {
-                    if (value[property] !== undefined) {
-                        filteredValue[property as keyof V] = value[property];
-                    }
-                }
-                result.push({ key, value: filteredValue });
-            }
-            else {
-                result.push({ key, value });
-            }
-        }
-        return result;
+        return this._iterate(() => true, options?.properties);
     }
+    
+    async search<V>(options: {
+        search: string;
+        searchProperties: string[];
+        properties?: string[];
+    }): Promise<{
+        key: string,
+        value: Partial<V>,
+    }[]> {
+        const searchTerm = options.search.toLowerCase();
+        
+        return this._iterate(
+            (value) => {
+                // Check if any of the search properties contain the search term (case insensitive)
+                return options.searchProperties.some(property => {
+                    const propertyValue = value[property];
+                    return typeof propertyValue === 'string' && 
+                           propertyValue.toLowerCase().includes(searchTerm);
+                });
+            },
+            options.properties
+        );
+    }
+    
     put(key: string, value: any): Promise<void> {
         return this.level.put(key, JSON.stringify(value));
     }
