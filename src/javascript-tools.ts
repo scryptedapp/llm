@@ -4,8 +4,15 @@ import { createToolTextResult, createUnknownToolError } from './tools-common';
 export const EvaluateJsToolFunctionName = 'evaluate-js';
 
 // Evaluates JavaScript code in a restricted browser context
-export async function evaluateJs(code: string): Promise<CallToolResult> {
+async function evaluateJs(code: string, findChatBlob: (token: string) => any): Promise<CallToolResult> {
     try {
+        // next line marks it as in use.
+        function readChatUrl(url: string) {
+            const token = url.replace('chat://', '');
+            return findChatBlob(token);
+        }
+        readChatUrl;
+
         const result = await eval(code);
         if (typeof result === 'string') {
             return createToolTextResult(result);
@@ -49,6 +56,9 @@ export function getEvaluateJsToolFunction(): ChatCompletionFunctionTool {
 }
 
 export class JavascriptTools implements LLMTools {
+    constructor(public readChatBlob: (token: string) => any) {
+    }
+
     async getLLMTools(): Promise<ChatCompletionFunctionTool[]> {
         return [getEvaluateJsToolFunction()];
     }
@@ -56,7 +66,7 @@ export class JavascriptTools implements LLMTools {
     async callLLMTool(name: string, parameters: Record<string, any>) {
         if (name === EvaluateJsToolFunctionName) {
             const { code } = parameters;
-            return await evaluateJs(code);
+            return await evaluateJs(code, this.readChatBlob);
         }
         throw createUnknownToolError(name);
     }

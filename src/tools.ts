@@ -1,7 +1,8 @@
-import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic, EventRecorder, VideoRecorder } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
-import { createToolImageResult, createToolTextAndImageResult, createToolTextResult, createUnknownToolError } from "./tools-common";
+import { createToolImageResult, createToolTextAndImageResult, createToolTextResult, createToolTextAndResourceResult, createUnknownToolError } from "./tools-common";
+import { generate } from 'random-words';
 
 export class ScryptedTools implements LLMTools {
     objectDetector: ObjectDetection;
@@ -343,7 +344,58 @@ export class ScryptedTools implements LLMTools {
             });
         }
 
-        return [...cams, ...lights, ...fans, ...notifiers, ...objectDetectors, getTimeToolFunction()];
+        const videoRecorders: ChatCompletionFunctionTool[] = [];
+        const listVideoRecorders = this.listVideoRecorders();
+        if (listVideoRecorders.length) {
+            videoRecorders.push({
+                type: 'function',
+                function: {
+                    name: 'list-video-recorders',
+                    description: 'List all available video recorder devices.',
+                    parameters: {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": false
+                    },
+                },
+
+            }, {
+                type: 'function',
+                function: {
+                    name: 'query-video-recorder',
+                    description: `Query events from a video recorder device. Returns event data as JSON that can be analyzed with other tools. The video recorder list is:\n${listVideoRecorders}\n\nNote: startTime is required and can be a negative number to specify a time relative to now. endTime is optional and defaults to current time. Both can be negative to specify relative times. Maximum query range is 24 hours.`,
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "recorder": {
+                                "type": "string",
+                                "description": "The name of the video recorder to query.",
+                            },
+                            "startTime": {
+                                "type": "number",
+                                "description": "The start time for events in milliseconds since epoch (can be negative for relative to current time). Required.",
+                            },
+                            "endTime": {
+                                "type": "number",
+                                "description": "The end time for events in milliseconds since epoch (can be negative for relative to current time). Optional, defaults to current time.",
+                            },
+                            "count": {
+                                "type": "number",
+                                "description": "The maximum number of events to return (optional).",
+                            },
+                        },
+                        "required": [
+                            "recorder",
+                            "startTime"
+                        ],
+                        "additionalProperties": false
+                    },
+                },
+            });
+        }
+
+        return [...cams, ...lights, ...fans, ...notifiers, ...objectDetectors, ...videoRecorders, getTimeToolFunction()];
     }
 
     listLights() {
@@ -392,6 +444,17 @@ export class ScryptedTools implements LLMTools {
             const d = sdk.systemManager.getDeviceById(id);
             return d.id + '\n' + '  - ' + d.name;
         }).join('\n');
+    }
+
+    listVideoRecorders() {
+        const { sdk } = this;
+        const ids = Object.keys(sdk.systemManager.getSystemState());
+        const videoRecorderIds = ids.filter(id => {
+            const device = sdk.systemManager.getDeviceById(id);
+            return device.interfaces.includes(ScryptedInterface.EventRecorder) &&
+                device.interfaces.includes(ScryptedInterface.VideoRecorder);
+        });
+        return videoRecorderIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
     }
 
     async callLLMTool(name: string, parameters: Record<string, any>) {
@@ -528,6 +591,69 @@ export class ScryptedTools implements LLMTools {
                 console.error('Failed to create annotated image:', error);
                 return createToolTextResult(`Detected objects: ${detectionText}`);
             }
+        }
+        else if (name === 'list-video-recorders') {
+            const recorders = this.listVideoRecorders();
+            if (!recorders) {
+                return createToolTextResult('No video recorders found.');
+            }
+            return createToolTextResult(`Available video recorders:\n${recorders}`);
+        }
+        else if (name === 'query-video-recorder') {
+            const recorderName = parameters.recorder;
+            let { startTime, endTime } = parameters;
+
+            if (!recorderName)
+                return createToolTextResult(`"recorder" parameter is required for query-video-recorder tool. Valid recorder names are: ${this.listVideoRecorders()}`);
+            if (startTime === undefined)
+                return createToolTextResult(`"startTime" parameter is required for query-video-recorder tool.`);
+
+            const recorder = sdk.systemManager.getDeviceByName<EventRecorder & VideoRecorder>(recorderName);
+            if (!recorder || !recorder.interfaces.includes(ScryptedInterface.EventRecorder) || !recorder.interfaces.includes(ScryptedInterface.VideoRecorder))
+                return createToolTextResult(`${recorderName} is not a valid video recorder. Valid recorder names are: ${this.listVideoRecorders()}`);
+
+            // Process startTime (required)
+            startTime ||= Date.now();
+            if (startTime < 0) {
+                // Negative startTime means relative to current time
+                startTime = Date.now() + startTime;
+            }
+
+            // Process endTime (optional, defaults to current time)
+            endTime ||= Date.now();
+            if (endTime < 0) {
+                // Negative endTime means relative to current time
+                endTime = Date.now() + endTime;
+            }
+
+            // Validate that the time range doesn't exceed 24 hours
+            const timeRange = Math.abs(endTime - startTime);
+            const maxTimeRange = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+            if (timeRange > maxTimeRange) {
+                return createToolTextResult(`Time range exceeds 24 hours limit. Requested range: ${Math.round(timeRange / (60 * 60 * 1000) * 100) / 100} hours.`);
+            }
+
+            // Prepare options for getRecordedEvents
+            const options: any = {
+                startTime,
+                endTime,
+            };
+
+            if (parameters.count !== undefined) {
+                options.count = parameters.count;
+            }
+
+            const events = await recorder.getRecordedEvents(options);
+
+            // Convert events to JSON string
+            const eventsJson = JSON.stringify(events, null, 2);
+
+            // Create a text description
+            const eventCount = events.length;
+            const text = `Retrieved ${eventCount} events from ${recorderName} for time range ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}.`;
+
+            // Return the result with the JSON data as a resource
+            return createToolTextAndResourceResult(text, eventsJson, 'application/json');
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();

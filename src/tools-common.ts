@@ -34,6 +34,7 @@ export function createToolImageResult(base64Data: string, mimeType = 'image/jpeg
         ],
     };
 }
+
 export function createToolTextAndImageResult(text: string, base64Data: string, mimeType = 'image/jpeg'): CallToolResult {
     return {
         content: [
@@ -41,6 +42,25 @@ export function createToolTextAndImageResult(text: string, base64Data: string, m
                 type: 'image',
                 data: base64Data,
                 mimeType,
+            },
+            {
+                type: 'text',
+                text,
+            }
+        ],
+    };
+}
+
+export function createToolTextAndResourceResult(text: string, resource: string, mimeType = 'image/jpeg'): CallToolResult {
+    return {
+        content: [
+            {
+                type: 'resource',
+                resource: {
+                    mimeType,
+                    text: resource,
+                    uri: undefined as any,
+                },
             },
             {
                 type: 'text',

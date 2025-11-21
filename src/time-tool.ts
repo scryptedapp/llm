@@ -9,6 +9,10 @@ export function callGetTimeTool(): CallToolResult {
             {
                 type: 'text',
                 text,
+            },
+            {
+                type: 'text',
+                text: 'Epoch Time: ' + Date.now(),
             }
         ]
     }

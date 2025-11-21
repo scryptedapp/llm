@@ -1,4 +1,4 @@
-import type { CallToolResult, ChatCompletionCapabilities, LLMTools } from "@scrypted/types";
+import type { CallToolResult, ChatCompletionCapabilities, LLMTools, TextResourceContents } from "@scrypted/types";
 import type { OpenAI } from 'openai';
 import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
 import type { ChatCompletionFunctionTool, ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
@@ -52,13 +52,13 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     };
 }
 
-function findChatBlob(token: string, history: CallToolResult[]) {
+export function findChatBlob(token: string, history: CallToolResult[]) {
     // find the tool call that has a meta with the chat url
     for (const message of history) {
         const meta = (message._meta?.['chat.scrypted.app/'] as any);
         if (!meta)
             continue;
-        
+
         // Check images
         const images = meta.images;
         if (images) {
@@ -68,7 +68,7 @@ function findChatBlob(token: string, history: CallToolResult[]) {
                 }
             }
         }
-        
+
         // Check audio
         const audio = meta.audio;
         if (audio) {
@@ -76,6 +76,21 @@ function findChatBlob(token: string, history: CallToolResult[]) {
                 if (audioFile.token === token) {
                     return audioFile.src;
                 }
+            }
+        }
+
+        const resources = meta.resources;
+        for (const resource of resources) {
+            if (resource.token === token) {
+                const text = resource.text;
+                if (resource.mimeType === 'application/json') {
+                    try {
+                        return JSON.parse(text);
+                    }
+                    catch (e) {
+                    }
+                }
+                return text;
             }
         }
     }
@@ -108,15 +123,15 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         if (value.startsWith('chat://')) {
                             const src = findChatBlob(new URL(value).host, toolHistory);
                             if (src) {
-                               parsed[param] = src;
-                               tc.function.arguments = JSON.stringify(parsed);
+                                parsed[param] = src;
+                                tc.function.arguments = JSON.stringify(parsed);
                             }
                         }
                     }
                 }
             }
         }
-        catch (e){ 
+        catch (e) {
         }
 
         callingTool?.(tc);
@@ -199,7 +214,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         role: 'user',
                         content: `Audio file is available at: \`chat://${token}\``,
                     });
-                    
+
                     messages.callToolResult._meta ||= {};
                     const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.audio ||= [];
@@ -222,6 +237,18 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
             }
             else if (content.type === 'text') {
                 messageStrings.push(content.text);
+            }
+            else if (content.type === 'resource') {
+                const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
+                messageStrings.push(`The tool resource was presented to the user. You can use the readChatUrl(url: string) function within the evaluate-js tool to query this data using the following URL: \`chat://${token}\`.`);
+                messages.callToolResult._meta ||= {};
+                const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                meta.resources ||= [];
+                meta.resources.push({
+                    token,
+                    text: (content.resource as TextResourceContents).text,
+                    mimeType: (content.resource as TextResourceContents).mimeType,
+                });
             }
             else {
                 throw new Error(`Unsupported content type ${content.type} in tool call response.`);
