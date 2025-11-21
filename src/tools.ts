@@ -391,6 +391,35 @@ export class ScryptedTools implements LLMTools {
                         "additionalProperties": false
                     },
                 },
+            }, {
+                type: 'function',
+                function: {
+                    name: 'get-detection-thumbnail',
+                    description: `Get a thumbnail image for a specific detection event from a video recorder. The recorder name, timestamp, and detectionId are required. The detectionId is returned from the search-video-detections tool.`,
+                    parameters: {
+                        "type": "object",
+                        "properties": {
+                            "recorder": {
+                                "type": "string",
+                                "description": "The name of the video recorder to get the thumbnail from.",
+                            },
+                            "timestamp": {
+                                "type": "number",
+                                "description": "The timestamp of the detection event in milliseconds since epoch. This will be one of the timestamps returned from the search-video-detections tool.",
+                            },
+                            "detectionId": {
+                                "type": "string",
+                                "description": "The detection ID returned from the search-video-detections tool. This will be one of the detectionId values in the returned ObjectsDetected entries.",
+                            },
+                        },
+                        "required": [
+                            "recorder",
+                            "timestamp",
+                            "detectionId"
+                        ],
+                        "additionalProperties": false
+                    },
+                },
             });
         }
 
@@ -689,6 +718,30 @@ export interface ObjectDetectionResult extends BoundingBoxResult {
 
             // Return the result with the JSON data as a resource
             return createToolTextAndResourceResult(text, eventsJson, 'application/json');
+        }
+        else if (name === 'get-detection-thumbnail') {
+            const recorderName = parameters.recorder;
+            const timestamp = parameters.timestamp;
+            const detectionId = parameters.detectionId;
+            
+            if (!recorderName)
+                return createToolTextResult(`"recorder" parameter is required for get-detection-thumbnail tool. Valid recorder names are: ${this.listVideoRecorders()}`);
+            if (timestamp === undefined)
+                return createToolTextResult(`"timestamp" parameter is required for get-detection-thumbnail tool.`);
+            if (!detectionId)
+                return createToolTextResult(`"detectionId" parameter is required for get-detection-thumbnail tool.`);
+                
+            const recorder = sdk.systemManager.getDeviceByName<VideoRecorder>(recorderName);
+            if (!recorder || !recorder.interfaces.includes(ScryptedInterface.VideoRecorder))
+                return createToolTextResult(`${recorderName} is not a valid video recorder. Valid recorder names are: ${this.listVideoRecorders()}`);
+            
+            try {
+                const thumbnail = await recorder.getRecordingStreamThumbnail(timestamp, { detectionId });
+                const buffer = await sdk.mediaManager.convertMediaObjectToBuffer(thumbnail, 'image/jpeg');
+                return createToolImageResult(buffer.toString('base64'));
+            } catch (error: any) {
+                return createToolTextResult(`Failed to get thumbnail for detection: ${error.message}`);
+            }
         }
         else if (name === TimeToolFunctionName) {
             return callGetTimeTool();

@@ -80,17 +80,19 @@ export function findChatBlob(token: string, history: CallToolResult[]) {
         }
 
         const resources = meta.resources;
-        for (const resource of resources) {
-            if (resource.token === token) {
-                const text = resource.text;
-                if (resource.mimeType === 'application/json') {
-                    try {
-                        return JSON.parse(text);
+        if (resources) {
+            for (const resource of resources) {
+                if (resource.token === token) {
+                    const text = resource.text;
+                    if (resource.mimeType === 'application/json') {
+                        try {
+                            return JSON.parse(text);
+                        }
+                        catch (e) {
+                        }
                     }
-                    catch (e) {
-                    }
+                    return text;
                 }
-                return text;
             }
         }
     }
