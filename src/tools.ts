@@ -1,8 +1,7 @@
-import type { Brightness, Camera, ChatCompletionFunctionTool, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic, EventRecorder, VideoRecorder } from "@scrypted/sdk";
+import type { Brightness, Camera, ChatCompletionFunctionTool, EventRecorder, LLMTools, Notifier, ObjectDetection, OnOff, ScryptedStatic, VideoRecorder } from "@scrypted/sdk";
 import { ScryptedDeviceType, ScryptedInterface } from '@scrypted/types';
 import { callGetTimeTool, getTimeToolFunction, TimeToolFunctionName } from "./time-tool";
-import { createToolImageResult, createToolTextAndImageResult, createToolTextResult, createToolTextAndResourceResult, createUnknownToolError } from "./tools-common";
-import { generate } from 'random-words';
+import { createToolImageResult, createToolTextAndImageResult, createToolTextAndResourceResult, createToolTextResult, createUnknownToolError } from "./tools-common";
 
 export class ScryptedTools implements LLMTools {
     objectDetector: ObjectDetection;
