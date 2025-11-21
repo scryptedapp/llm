@@ -349,8 +349,8 @@ export class ScryptedTools implements LLMTools {
             videoRecorders.push({
                 type: 'function',
                 function: {
-                    name: 'list-video-recorders',
-                    description: 'List all available video recorder devices.',
+                    name: 'list-video-detectors',
+                    description: 'List all available camera devices that are recording detection events.',
                     parameters: {
                         "type": "object",
                         "properties": {},
@@ -362,8 +362,8 @@ export class ScryptedTools implements LLMTools {
             }, {
                 type: 'function',
                 function: {
-                    name: 'query-video-recorder',
-                    description: `Query events from a video recorder device. Returns event data as JSON that can be analyzed with other tools. The video recorder list is:\n${listVideoRecorders}\n\nNote: startTime is required and can be a negative number to specify a time relative to now. endTime is optional and defaults to current time. Both can be negative to specify relative times. Maximum query range is 24 hours.`,
+                    name: 'search-video-detections',
+                    description: `Search events from a camera device that is recording detection events. Returns event data as JSON that can be analyzed with other tools. The video recorder list is:\n${listVideoRecorders}\n\nNote: startTime is required and can be a negative number to specify a time relative to now. endTime is optional and defaults to current time. Both can be negative to specify relative times. Maximum query range is 24 hours.`,
                     parameters: {
                         "type": "object",
                         "properties": {
@@ -591,21 +591,21 @@ export class ScryptedTools implements LLMTools {
                 return createToolTextResult(`Detected objects: ${detectionText}`);
             }
         }
-        else if (name === 'list-video-recorders') {
+        else if (name === 'list-video-detectors') {
             const recorders = this.listVideoRecorders();
             if (!recorders) {
                 return createToolTextResult('No video recorders found.');
             }
             return createToolTextResult(`Available video recorders:\n${recorders}`);
         }
-        else if (name === 'query-video-recorder') {
+        else if (name === 'search-video-detections') {
             const recorderName = parameters.recorder;
             let { startTime, endTime } = parameters;
 
             if (!recorderName)
-                return createToolTextResult(`"recorder" parameter is required for query-video-recorder tool. Valid recorder names are: ${this.listVideoRecorders()}`);
+                return createToolTextResult(`"recorder" parameter is required for search-video-detections tool. Valid recorder names are: ${this.listVideoRecorders()}`);
             if (startTime === undefined)
-                return createToolTextResult(`"startTime" parameter is required for query-video-recorder tool.`);
+                return createToolTextResult(`"startTime" parameter is required for search-video-detections tool.`);
 
             const recorder = sdk.systemManager.getDeviceByName<EventRecorder & VideoRecorder>(recorderName);
             if (!recorder || !recorder.interfaces.includes(ScryptedInterface.EventRecorder) || !recorder.interfaces.includes(ScryptedInterface.VideoRecorder))
