@@ -17,11 +17,15 @@ async function evaluateJs(code: string, findChatBlob: (token: string) => any): P
         if (typeof result === 'string') {
             return createToolTextResult(result);
         }
+        let text = JSON.stringify(result, null, 2);
+        if (text.length > 10000) {
+            text = 'The evaluate-js result was too large to return in full and has been truncated significantly. Modify your script to return less data. Truncated output:\n\n' + text.substring(0, 500) + '\n\n...[truncated]';
+        }
         const ret: CallToolResult = {
             content: [
                 {
                     type: 'text',
-                    text: JSON.stringify(result, null, 2),
+                    text,
                 },
             ],
             structuredContent: {

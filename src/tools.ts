@@ -652,6 +652,7 @@ export class ScryptedTools implements LLMTools {
             // Create a text description
             const eventCount = events.length;
             let text = `Retrieved ${eventCount} events from ${recorderName} for time range ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}.`;
+            if (eventCount) {
             text += '\nThe events return type is an Array<ObjectsDetected> in chronological order, ObjectsDetected is defined as:\n';
             text +=
 `
@@ -662,6 +663,9 @@ export interface ObjectsDetected {
      */
     detectionId?: string;
     inputDimensions?: [number, number];
+    /**
+     * The timestamp of the detection event. Convert to a locale time string using new Date(timestamp).toLocaleString(), etc, when presenting ot the user.
+     */
     timestamp: number;
 }
 
@@ -681,6 +685,8 @@ export interface ObjectDetectionResult extends BoundingBoxResult {
     score: number;
 }
 `;
+            }
+
             // Return the result with the JSON data as a resource
             return createToolTextAndResourceResult(text, eventsJson, 'application/json');
         }
