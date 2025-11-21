@@ -642,15 +642,45 @@ export class ScryptedTools implements LLMTools {
                 options.count = parameters.count;
             }
 
-            const events = await recorder.getRecordedEvents(options);
+            let events = await recorder.getRecordedEvents(options);
+
+            events = events.filter(event => event.details.eventInterface === ScryptedInterface.ObjectDetector).map(d => d.data);
 
             // Convert events to JSON string
             const eventsJson = JSON.stringify(events, null, 2);
 
             // Create a text description
             const eventCount = events.length;
-            const text = `Retrieved ${eventCount} events from ${recorderName} for time range ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}.`;
+            let text = `Retrieved ${eventCount} events from ${recorderName} for time range ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}.`;
+            text += '\nThe events return type is an Array<ObjectsDetected> in chronological order, ObjectsDetected is defined as:\n';
+            text +=
+`
+export interface ObjectsDetected {
+    detections?: ObjectDetectionResult[];
+    /**
+     * The id for the detection session.
+     */
+    detectionId?: string;
+    inputDimensions?: [number, number];
+    timestamp: number;
+}
 
+export interface ObjectDetectionResult extends BoundingBoxResult {
+    /**
+     * The detection class of the object.
+     */
+    className: ObjectDetectionClass;
+    /**
+     * Base64 encoded embedding float32 vector.
+     */
+    embedding?: string;
+    /**
+     * The label of the object, if it was recognized as a familiar object (person, pet, etc).
+     */
+    label?: string;
+    score: number;
+}
+`;
             // Return the result with the JSON data as a resource
             return createToolTextAndResourceResult(text, eventsJson, 'application/json');
         }
