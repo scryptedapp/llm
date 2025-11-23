@@ -458,9 +458,10 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
                 'unsloth/gemma-3-4b-it-GGUF',
                 'unsloth/gemma-3-12b-it-GGUF',
                 'unsloth/gemma-3-27b-it-GGUF',
-                'unsloth/Qwen2.5-VL-32B-Instruct-GGUF',
-                'unsloth/Qwen2.5-VL-7B-Instruct-GGUF',
-                'unsloth/Qwen2.5-VL-3B-Instruct-GGUF',
+                'unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF',
+                'unsloth/Qwen3-VL-8B-Instruct-GGUF',
+                'unsloth/Qwen3-VL-4B-Instruct-GGUF',
+                'unsloth/Qwen3-VL-2B-Instruct-GGUF',
             ],
             onPut: () => {
                 this.stopLlamaServer();
@@ -475,12 +476,12 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             defaultValue: [
                 '-ngl 999',
                 '--jinja',
-                '-fa',
+                '-fa on',
             ],
             choices: [
                 '-ngl 999',
                 '--jinja',
-                '-fa',
+                '-fa on',
             ],
             onPut: () => {
                 this.stopLlamaServer();

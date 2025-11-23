@@ -1,12 +1,12 @@
-import fs from 'fs';
-import path from 'path';
-import {https} from 'follow-redirects';
-import os from 'os';
 import { once } from 'events';
+import { https } from 'follow-redirects';
+import fs from 'fs';
 import { IncomingMessage } from 'http';
-import AdmZip from 'adm-zip';
+import os from 'os';
+import path from 'path';
+import yauzl from 'yauzl';
 
-export const llamaVersion = 'b5835';
+export const llamaVersion = 'b6910';
 
 
 export const hasCUDA = (process.platform === 'linux' && process.env.NVIDIA_VISIBLE_DEVICES && process.env.NVIDIA_DRIVER_CAPABILITIES)
@@ -84,8 +84,114 @@ export async function downloadLLama() {
 
     const buffer = Buffer.concat(buffers);
 
-    const zip = new AdmZip(buffer);
-    zip.extractAllTo(extractPath, true, true);
+    // Open the zip file
+    const zip = await new Promise<yauzl.ZipFile>((resolve, reject) => {
+        yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
+            if (err) reject(err);
+            else resolve(zipfile!);
+        });
+    });
+
+    // Process zip entries
+    await new Promise<void>((resolve, reject) => {
+        zip.on('entry', async (entry) => {
+            const entryPath = path.join(extractPath, entry.fileName);
+
+            // Skip if entry is unsafe
+            if (!entryPath.startsWith(extractPath)) {
+                zip.readEntry();
+                return;
+            }
+
+            // Handle directories
+            if (entry.fileName.endsWith('/')) {
+                await fs.promises.mkdir(entryPath, { recursive: true });
+                zip.readEntry();
+                return;
+            }
+
+            // Ensure parent directory exists
+            const dirName = path.dirname(entryPath);
+            await fs.promises.mkdir(dirName, { recursive: true });
+
+            // Open read stream for the entry
+            zip.openReadStream(entry, async (err, readStream) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+
+                if (!readStream) {
+                    reject(new Error('Failed to open read stream for zip entry'));
+                    return;
+                }
+
+                // Check if entry is a symlink
+                function modeFromEntry(entry: any) {
+                    const attr = entry.externalFileAttributes >> 16 || 33188;
+
+                    return [448, 56, 7]
+                        .map(mask => attr & mask)
+                        .reduce((a, b) => a + b, attr & 61440);
+                }
+
+                const isSymlink = ((modeFromEntry(entry) & 0o170000) === 0o120000);
+
+                if (isSymlink) {
+                    const chunks: Buffer[] = [];
+                    readStream.on('data', (chunk: Buffer) => chunks.push(chunk));
+                    readStream.on('end', async () => {
+                        const linkTarget = Buffer.concat(chunks).toString('utf8');
+                        try {
+                            // Ensure parent directory exists for symlink
+                            const symlinkDir = path.dirname(entryPath);
+                            await fs.promises.mkdir(symlinkDir, { recursive: true });
+
+                            // Create symlink
+                            await fs.promises.symlink(linkTarget, entryPath);
+                        } catch (e) {
+                            // If symlink fails, write as regular file
+                            const writer = fs.createWriteStream(entryPath);
+                            readStream.pipe(writer);
+                            writer.on('close', () => zip.readEntry());
+                            writer.on('error', reject);
+                            return;
+                        }
+                        zip.readEntry();
+                    });
+                    readStream.on('error', reject);
+                } else {
+                    // Regular file
+                    const writer = fs.createWriteStream(entryPath);
+                    readStream.pipe(writer);
+
+                    // Set file permissions if available and handle next entry
+                    writer.on('close', async () => {
+                        if (entry.externalFileAttributes) {
+                            const fileMode = (entry.externalFileAttributes >>> 16) & 0o777;
+                            if (fileMode) {
+                                try {
+                                    await fs.promises.chmod(entryPath, fileMode);
+                                } catch (e) {
+                                    console.warn(`Failed to set permissions for ${entryPath}:`, e);
+                                }
+                            }
+                        }
+                        zip.readEntry();
+                    });
+
+                    writer.on('error', reject);
+                }
+            });
+        });
+
+        zip.on('end', () => resolve());
+        zip.on('error', reject);
+
+        // Start reading entries
+        zip.readEntry();
+    });
+
     await fs.promises.rename(path.join(extractPath, 'build'), buildPath);
 
     if (!fs.existsSync(llamaBinary))

@@ -51,22 +51,22 @@
       "@scrypted/deferred": "^0.0.8",
       "@scrypted/sdk": "^0.5.50",
       "@scrypted/types": "^0.5.45",
-      "adm-zip": "^0.5.16",
       "follow-redirects": "^1.15.9",
       "level": "^10.0.0",
       "openai": "^6.8.1",
-      "random-words": "^2.0.1"
+      "random-words": "^2.0.1",
+      "yauzl": "^2.10.0"
    },
    "devDependencies": {
       "@mozilla/readability": "^0.6.0",
-      "@types/adm-zip": "^0.5.7",
       "@types/follow-redirects": "^1.14.4",
       "@types/jsdom": "^21.1.7",
-      "@types/node": "^22.19.1"
+      "@types/node": "^22.19.1",
+      "@types/yauzl": "^2.10.3"
    },
    "optionalDependencies": {
       "@modelcontextprotocol/sdk": "^1.17.0",
       "jsdom": "^26.1.0"
    },
-   "version": "0.0.72"
+   "version": "0.0.73"
 }
