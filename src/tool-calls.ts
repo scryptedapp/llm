@@ -60,6 +60,8 @@ class InvalidBlobMimeTypeError extends Error {
 
 export function findChatBlob(token: string, history: CallToolResult[], requiredMimeType?: string) {
     // find the tool call that has a meta with the chat url
+    let mutableValue: any;
+
     for (const message of history) {
         const meta = (message._meta?.['chat.scrypted.app/'] as any);
         if (!meta)
@@ -70,7 +72,8 @@ export function findChatBlob(token: string, history: CallToolResult[], requiredM
         if (images) {
             for (const image of images) {
                 if (image.token === token) {
-                    return image.src;
+                    mutableValue = image.src;
+                    continue;
                 }
             }
         }
@@ -80,7 +83,8 @@ export function findChatBlob(token: string, history: CallToolResult[], requiredM
         if (audio) {
             for (const audioFile of audio) {
                 if (audioFile.token === token) {
-                    return audioFile.src;
+                    mutableValue = audioFile.src;
+                    continue;
                 }
             }
         }
@@ -95,16 +99,20 @@ export function findChatBlob(token: string, history: CallToolResult[], requiredM
                     }
                     if (resource.mimeType === 'application/json') {
                         try {
-                            return JSON.parse(text);
+                            mutableValue = JSON.parse(text);
+                            continue;
                         }
                         catch (e) {
                         }
                     }
-                    return text;
+                    mutableValue = text;
+                    continue;
                 }
             }
         }
     }
+
+    return mutableValue;
 }
 
 export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, toolHistory: CallToolResult[], assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void) {
@@ -122,6 +130,8 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
         let tc = JSON.parse(JSON.stringify(_tc)) as ParsedFunctionToolCall;
 
         const tool = tools.tools.find(t => t.type === 'function' && t.function.name === tc.function.name) as ChatCompletionFunctionTool;
+        const chatUrls = new Map<string, string>();
+
         try {
             if (tool && tc.function.arguments && tool.function.parameters) {
                 const parsed = JSON.parse(tc.function.arguments);
@@ -134,6 +144,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         if (value.startsWith('chat://')) {
                             const src = findChatBlob(new URL(value).host, toolHistory, schemaValue.mimeType);
                             if (src) {
+                                chatUrls.set(param, value.substring(7));
                                 parsed[param] = src;
                                 tc.function.arguments = JSON.stringify(parsed);
                             }
@@ -250,8 +261,16 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                 messageStrings.push(content.text);
             }
             else if (content.type === 'resource') {
-                const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
-                messageStrings.push(`The tool resource was presented to the user. You MUST use the readChatUrl(url: string) function within the evaluate-js tool to query this data using the following URL: \`chat://${token}\`.`);
+                let token: string | undefined;
+                const mutable = (content._meta?.['chat.scrypted.app/'] as any)?.mutable;
+                if (mutable && tool.function.parameters) {
+                    const property = Object.entries(tool.function.parameters.properties as any).find(([k, v]) => k === mutable);
+                    if (property) {
+                        token = chatUrls.get(property[0]);
+                    }
+                }
+                token ||= (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
+                messageStrings.push(`The tool resource was returned. You MUST use the readChatUrl(url: string) function within the evaluate-js tool to query this data using the following URL: \`chat://${token}\`.`);
                 messages.callToolResult._meta ||= {};
                 const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                 meta.resources ||= [];
