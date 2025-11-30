@@ -9,7 +9,7 @@ import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/re
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
-import { downloadLLama } from './download-llama';
+import { downloadLLama, llamaVersion } from './download-llama';
 import { LLMUserMixin } from './llm-user';
 import { MCPServer } from './mcp-server';
 import { handleToolCalls, prepareTools } from './tool-calls';
@@ -359,7 +359,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     }
 }
 
-async function llamaFork(providedPort: number, apiKey: string, model: string, additionalArguments: string[], backend?: string) {
+async function llamaFork(providedPort: number, apiKey: string, model: string, additionalArguments: string[], backend?: string, version?: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
         await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => { });
@@ -378,7 +378,7 @@ async function llamaFork(providedPort: number, apiKey: string, model: string, ad
     }
 
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
-    const llamaBinary = await downloadLLama(backend);
+    const llamaBinary = await downloadLLama(backend, version);
 
     const host = apiKey ? '0.0.0.0' : '127.0.0.1';
     providedPort ||= 0;
@@ -482,6 +482,19 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
                 'cuda',
                 'sycl',
                 'vulkan',
+            ],
+            onPut: () => {
+                this.stopLlamaServer();
+            },
+        },
+        version: {
+            title: 'Version',
+            description: 'The llama.cpp version to use.',
+            type: 'string',
+            defaultValue: llamaVersion,
+            combobox: true,
+            choices: [
+                llamaVersion,
             ],
             onPut: () => {
                 this.stopLlamaServer();
@@ -612,7 +625,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             });
             this.llamaBaseUrl = (async () => {
                 const result = await this.forked!.result;
-                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model, this.llamaSettings.values.additionalArguments, this.llamaSettings.values.backend);
+                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model, this.llamaSettings.values.additionalArguments, this.llamaSettings.values.backend, this.llamaSettings.values.version);
             })();
             this.forked.worker.on('exit', () => {
                 this.forked = undefined;

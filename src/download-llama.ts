@@ -33,17 +33,19 @@ function getBinarySuffix(backend?: string) {
     return `-vulkan`;
 }
 
-export function getBinaryUrl(suffix: string) {
+export function getBinaryUrl(suffix: string, version?: string) {
+    const effectiveVersion = version || llamaVersion;
     // https://github.com/scryptedapp/llm/releases/download/b6910/llama-b6910-bin-ubuntu-sycl-x64.zip
     // https://github.com/ggml-org/llama.cpp/releases/download/b7210/llama-b7210-bin-macos-x64.zip
     const orgRepo = suffix === '-sycl' ? 'scryptedapp/llm' : 'ggml-org/llama.cpp';
     const platform = process.platform === 'linux' ? 'ubuntu' : process.platform;
-    return `https://github.com/${orgRepo}/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-${platform}${suffix}-${process.arch}.zip`;
+    return `https://github.com/${orgRepo}/releases/download/${effectiveVersion}/llama-${effectiveVersion}-bin-${platform}${suffix}-${process.arch}.zip`;
 }
 
-export async function downloadLLama(backend?: string) {
+export async function downloadLLama(backend?: string, version?: string) {
+    version ||= llamaVersion;
     const suffix = getBinarySuffix(backend);
-    const versionPath = `v${llamaVersion}${suffix || '-default'}`;
+    const versionPath = `v${version}${suffix || '-default'}`;
     const llamaDownloadPath = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, versionPath);
 
 
@@ -73,7 +75,7 @@ export async function downloadLLama(backend?: string) {
     }
     await fs.promises.mkdir(extractPath, { recursive: true });
     await fs.promises.rm(buildPath, { recursive: true, force: true });
-    const binaryUrl = getBinaryUrl(suffix);
+    const binaryUrl = getBinaryUrl(suffix, version);
     console.warn(`Downloading llama.cpp binary from ${binaryUrl}`);
     const r = https.get(binaryUrl, {
         family: 4,
