@@ -1,6 +1,5 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceType, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
-import sdk, { HttpRequestHandler, ScryptedDeviceBase, ScryptedInterface } from '@scrypted/sdk';
+import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
@@ -11,14 +10,31 @@ import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama } from './download-llama';
+import { LLMUserMixin } from './llm-user';
 import { MCPServer } from './mcp-server';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './tools';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
-import { LLMUserMixin } from './llm-user';
 
 const WebSearchToolsNativeId = 'search-tools';
+
+const modelSetting = {
+    title: 'Model',
+    description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
+    placeholder: 'unsloth/gemma-3-4b-it-GGUF',
+    defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
+    combobox: true,
+    choices: [
+        'unsloth/gemma-3-4b-it-GGUF',
+        'unsloth/gemma-3-12b-it-GGUF',
+        'unsloth/gemma-3-27b-it-GGUF',
+        'unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF',
+        'unsloth/Qwen3-VL-8B-Instruct-GGUF',
+        'unsloth/Qwen3-VL-4B-Instruct-GGUF',
+        'unsloth/Qwen3-VL-2B-Instruct-GGUF',
+    ],
+};
 
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
@@ -343,7 +359,7 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     }
 }
 
-async function llamaFork(providedPort: number, apiKey: string, model: string, additionalArguments: string[]) {
+async function llamaFork(providedPort: number, apiKey: string, model: string, additionalArguments: string[], backend?: string) {
     if (process.platform !== 'win32') {
         // super hacky but need to clean up dangling processes.
         await once(child_process.spawn('killall', ['llama-server']), 'exit').catch(() => { });
@@ -362,7 +378,7 @@ async function llamaFork(providedPort: number, apiKey: string, model: string, ad
     }
 
     // ./llama-server -hf unsloth/gemma-3-4b-it-GGUF:UD-Q4_K_XL -ngl 99 --host 0.0.0.0 --port 8000
-    const llamaBinary = await downloadLLama();
+    const llamaBinary = await downloadLLama(backend);
 
     const host = apiKey ? '0.0.0.0' : '127.0.0.1';
     providedPort ||= 0;
@@ -449,23 +465,27 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
 
     llamaSettings = new StorageSettings(this, {
         model: {
-            title: 'Model',
-            description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
-            placeholder: 'unsloth/gemma-3-4b-it-GGUF',
-            defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
-            combobox: true,
-            choices: [
-                'unsloth/gemma-3-4b-it-GGUF',
-                'unsloth/gemma-3-12b-it-GGUF',
-                'unsloth/gemma-3-27b-it-GGUF',
-                'unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF',
-                'unsloth/Qwen3-VL-8B-Instruct-GGUF',
-                'unsloth/Qwen3-VL-4B-Instruct-GGUF',
-                'unsloth/Qwen3-VL-2B-Instruct-GGUF',
-            ],
+            ...modelSetting,
             onPut: () => {
                 this.stopLlamaServer();
             }
+        },
+        backend: {
+            title: 'Backend',
+            description: 'The runtime backend to use for the llama.cpp server.',
+            type: 'string',
+            defaultValue: 'Default',
+            combobox: true,
+            choices: [
+                'Default',
+                'cpu',
+                'cuda',
+                'sycl',
+                'vulkan',
+            ],
+            onPut: () => {
+                this.stopLlamaServer();
+            },
         },
         additionalArguments: {
             title: 'Additional Arguments',
@@ -592,7 +612,7 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             });
             this.llamaBaseUrl = (async () => {
                 const result = await this.forked!.result;
-                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model, this.llamaSettings.values.additionalArguments);
+                return result.llamaFork(this.llamaSettings.values.port, this.llamaSettings.values.apiKey, this.llamaSettings.values.model, this.llamaSettings.values.additionalArguments, this.llamaSettings.values.backend);
             })();
             this.forked.worker.on('exit', () => {
                 this.forked = undefined;
@@ -697,7 +717,7 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
     }
 
     async releaseMixin(id: string, mixinDevice: any): Promise<void> {
-        
+
     }
 
     async openDatabase(token: string): Promise<Database> {
@@ -849,49 +869,6 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
                     'MCP Server',
                 ],
             },
-            model: {
-                title: 'Model',
-                description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
-                placeholder: 'unsloth/gemma-3-4b-it-GGUF',
-                defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
-                radioGroups: [
-                    'llama.cpp',
-                ],
-                combobox: true,
-                choices: [
-                    'unsloth/gemma-3-4b-it-GGUF',
-                    'unsloth/gemma-3-12b-it-GGUF',
-                    'unsloth/gemma-3-27b-it-GGUF',
-                    'unsloth/Qwen2.5-VL-32B-Instruct-GGUF',
-                    'unsloth/Qwen2.5-VL-7B-Instruct-GGUF',
-                    'unsloth/Qwen2.5-VL-3B-Instruct-GGUF',
-                ],
-            },
-            clusterWorkerLabels: {
-                title: 'Cluster Worker Labels',
-                description: 'The labels to use for the cluster worker. This is used to determine which worker to run the llama server on.',
-                type: 'string',
-                multiple: true,
-                combobox: true,
-                radioGroups: [
-                    'llama.cpp',
-                ],
-                choices: [
-                    '@scrypted/coreml',
-                    '@scrypted/openvino',
-                    '@scrypted/onnx',
-                    'compute',
-                    'llm',
-                ],
-                async onGet() {
-                    return {
-                        hide: !sdk.clusterManager?.getClusterMode(),
-                    }
-                },
-                defaultValue: [
-                    'compute',
-                ],
-            }
         });
 
         return storageSettings.getSettings();

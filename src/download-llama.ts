@@ -12,43 +12,48 @@ export const llamaVersion = 'b6910';
 export const hasCUDA = (process.platform === 'linux' && process.env.NVIDIA_VISIBLE_DEVICES && process.env.NVIDIA_DRIVER_CAPABILITIES)
     || (process.platform === 'win32' && process.env.CUDA_PATH);
 export const hasIntel = os.cpus().some(cpu => cpu.model.includes('Intel'));
-// radeon builds are available but apparently vulkan is good as is.
-export const hasRadeon = false;
 
-export function getBinaryUrl() {
-    if (process.platform === 'darwin') {
-        if (process.arch === 'x64')
-            return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-macos-x64.zip`;
-        return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-macos-arm64.zip`;
-    }
+function getBinarySuffix(backend?: string) {
+    if (process.platform === 'darwin')
+        return '';
 
-    if (process.platform === 'linux') {
-        if (hasCUDA)
-            return `https://github.com/scryptedapp/llm/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-ubuntu-cuda-x64.zip`;
-        if (hasIntel)
-            return `https://github.com/scryptedapp/llm/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-ubuntu-sycl-x64.zip`;
-        return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-ubuntu-vulkan-x64.zip`;
-    }
+    if (process.platform === 'linux' && backend === 'cpu')
+        return '';
 
-    // windows
+    if (backend === 'Default')
+        backend = undefined;
+
+    if (backend)
+        return `-${backend}`;
+
     if (hasCUDA)
-        return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-win-cuda-12.4-x64.zip`;
-
+        return `-cuda`;
     if (hasIntel)
-        return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-win-sycl-x64.zip`;
-
-    if (hasRadeon)
-        return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-win-radeon-x64.zip`;
-
-    return `https://github.com/ggml-org/llama.cpp/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-win-vulkan-x64.zip`;
+        return `-sycl`;
+    return `-vulkan`;
 }
 
-export async function downloadLLama() {
-    const llamaDownloadPath = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, `v${llamaVersion}`);
+export function getBinaryUrl(suffix: string) {
+    // https://github.com/scryptedapp/llm/releases/download/b6910/llama-b6910-bin-ubuntu-sycl-x64.zip
+    // https://github.com/ggml-org/llama.cpp/releases/download/b7210/llama-b7210-bin-macos-x64.zip
+    const orgRepo = suffix === '-sycl' ? 'scryptedapp/llm' : 'ggml-org/llama.cpp';
+    const platform = process.platform === 'linux' ? 'ubuntu' : process.platform;
+    return `https://github.com/${orgRepo}/releases/download/${llamaVersion}/llama-${llamaVersion}-bin-${platform}${suffix}-${process.arch}.zip`;
+}
+
+export async function downloadLLama(backend?: string) {
+    const suffix = getBinarySuffix(backend);
+    const versionPath = `v${llamaVersion}${suffix || '-default'}`;
+    const llamaDownloadPath = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, versionPath);
+
+
+    // Prefix the binary path with the backend if specified
     let llamaBinary = path.join(llamaDownloadPath, 'build', 'bin', 'llama-server');
     if (process.platform === 'win32') {
         llamaBinary += '.exe';
     }
+
+    console.warn(`Using llama.cpp binary download path ${llamaBinary}`);
 
     if (fs.existsSync(llamaBinary)) {
         return llamaBinary;
@@ -68,7 +73,8 @@ export async function downloadLLama() {
     }
     await fs.promises.mkdir(extractPath, { recursive: true });
     await fs.promises.rm(buildPath, { recursive: true, force: true });
-    const binaryUrl = getBinaryUrl();
+    const binaryUrl = getBinaryUrl(suffix);
+    console.warn(`Downloading llama.cpp binary from ${binaryUrl}`);
     const r = https.get(binaryUrl, {
         family: 4,
     });
