@@ -38,7 +38,11 @@ export function getBinaryUrl(suffix: string, version?: string) {
     // https://github.com/scryptedapp/llm/releases/download/b6910/llama-b6910-bin-ubuntu-sycl-x64.zip
     // https://github.com/ggml-org/llama.cpp/releases/download/b7210/llama-b7210-bin-macos-x64.zip
     const orgRepo = suffix === '-sycl' ? 'scryptedapp/llm' : 'ggml-org/llama.cpp';
-    const platform = process.platform === 'linux' ? 'ubuntu' : process.platform;
+    const platform = process.platform === 'linux'
+        ? 'ubuntu'
+        : process.platform === 'darwin'
+            ? 'macos'
+            : process.platform;
     return `https://github.com/${orgRepo}/releases/download/${effectiveVersion}/llama-${effectiveVersion}-bin-${platform}${suffix}-${process.arch}.zip`;
 }
 
