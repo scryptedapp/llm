@@ -1,11 +1,11 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
+import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources';
-import type { ChatCompletionStreamParams, ParsedChatCompletion } from 'openai/resources/chat/completions';
+import type { ParsedChatCompletion } from 'openai/resources/chat/completions';
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
@@ -98,10 +98,12 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         if (lastMessage?.role !== 'user' && lastMessage?.role !== 'tool') {
             if (!userMessages)
                 throw new Error('Last message must not be from the assistant.');
-            const userMessage = await userMessages.next();
-            if (userMessage.done)
-                throw new Error('No user message provided for last message.');
-            body.messages.push(...userMessage.value);
+            if (!body.continue_final_message) {
+                const userMessage = await userMessages.next();
+                if (userMessage.done)
+                    throw new Error('No user message provided for last message.');
+                body.messages.push(...userMessage.value);
+            }
         }
 
         let error: Error | undefined;
