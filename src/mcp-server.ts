@@ -38,7 +38,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
 
         const modulePath = "@modelcontextprotocol/sdk/client/index.js";
 
-        const { Client } = await import(modulePath);
+        const { Client } = require(modulePath);
 
         this.client = new Client({
             name: 'Scrypted LLM Plugin',
@@ -49,7 +49,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
         const token = this.storageSettings.values.token;
         try {
             const modulePath = "@modelcontextprotocol/sdk/client/streamableHttp.js";
-            const { StreamableHTTPClientTransport } = await import(modulePath)
+            const { StreamableHTTPClientTransport } = require(modulePath)
             await this.client!.connect(new StreamableHTTPClientTransport(new URL(this.storageSettings.values.mcpServer), {
                 requestInit: {
                     headers: token
