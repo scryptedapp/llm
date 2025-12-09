@@ -114,22 +114,24 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                     return;
                 if (error)
                     throw error;
-                if ('delta' in message.choices[0]) {
-                    // this is a streaming chunk, yield it.
-                    if (callback)
-                        callback(message as OpenAI.ChatCompletionChunk).then(more => done = !more).catch(e => error = e);
-                    else if (callback !== null)
-                        yield message;
-                    continue;
-                }
+                if (message.choices[0]) {
+                    if ('delta' in message.choices[0]) {
+                        // this is a streaming chunk, yield it.
+                        if (callback)
+                            callback(message as OpenAI.ChatCompletionChunk).then(more => done = !more).catch(e => error = e);
+                        else if (callback !== null)
+                            yield message;
+                        continue;
+                    }
 
-                body.messages.push(message.choices[0].message);
-                // vllm freaks out if arguments is an empty string.
-                for (const tc of message.choices[0].message.tool_calls || []) {
-                    if (tc.type === 'custom')
-                        throw new Error('Custom tool calls are not supported.');
-                    if (tc.function)
-                        tc.function.arguments ||= '{}';
+                    body.messages.push(message.choices[0].message);
+                    // vllm freaks out if arguments is an empty string.
+                    for (const tc of message.choices[0].message.tool_calls || []) {
+                        if (tc.type === 'custom')
+                            throw new Error('Custom tool calls are not supported.');
+                        if (tc.function)
+                            tc.function.arguments ||= '{}';
+                    }
                 }
 
                 yield message;
