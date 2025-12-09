@@ -13,7 +13,7 @@ import { downloadLLama, llamaVersion } from './download-llama';
 import { LLMUserMixin } from './llm-user';
 import { MCPServer } from './mcp-server';
 import { handleToolCalls, prepareTools } from './tool-calls';
-import { ScryptedTools } from './tools';
+import { ScryptedTools } from './scrypted-tools';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
 
