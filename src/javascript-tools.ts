@@ -67,7 +67,7 @@ export class JavascriptTools implements LLMTools {
         return [getEvaluateJsToolFunction()];
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>) {
+    async callLLMTool(toolCallId: string, name: string, parameters: Record<string, any>) {
         if (name === EvaluateJsToolFunctionName) {
             const { code } = parameters;
             return await evaluateJs(code, this.readChatBlob);

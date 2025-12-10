@@ -78,7 +78,7 @@ export class MCPServer extends ScryptedDeviceBase implements LLMTools, Settings 
         }))
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>): Promise<CallToolResult> {
+    async callLLMTool(toolCallId: string, name: string, parameters: Record<string, any>): Promise<CallToolResult> {
         await this.ensureClientConnected();
         const result = await this.client!.callTool({
             name,

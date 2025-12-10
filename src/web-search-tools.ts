@@ -228,7 +228,7 @@ ${index + 1}. ${result.title}
         }
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>) {
+    async callLLMTool(toolCallId: string, name: string, parameters: Record<string, any>) {
         if (name === 'search-web') {
             return await this.searchWeb(parameters.query, parameters.general == undefined ? true : parameters.general, parameters.news, parameters.images, parameters.videos);
         } else if (name === 'get-web-page-content') {

@@ -486,7 +486,7 @@ export class ScryptedTools implements LLMTools {
         return videoRecorderIds.map(id => sdk.systemManager.getDeviceById(id).name).join('\n');
     }
 
-    async callLLMTool(name: string, parameters: Record<string, any>) {
+    async callLLMTool(toolCallId: string, name: string, parameters: Record<string, any>) {
         const { sdk } = this;
 
         if (name === 'take-picture') {
