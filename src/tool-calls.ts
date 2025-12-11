@@ -47,6 +47,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     }
 
     return {
+        map,
         tools,
         toolCall,
     };
