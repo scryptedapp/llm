@@ -5,7 +5,7 @@ import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources';
-import type { ParsedChatCompletion } from 'openai/resources/chat/completions';
+import type { ChatCompletionAssistantMessageParam, ParsedChatCompletion, ParsedChatCompletionMessage } from 'openai/resources/chat/completions';
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
@@ -94,24 +94,36 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     abstract get functionCalls(): boolean;
 
     async * streamChatCompletionWrapper(body: ChatCompletionStreamParams, userMessages?: AsyncGenerator<ChatCompletionMessageParam[]>, callback?: null | ((chunk: OpenAI.ChatCompletionChunk) => Promise<boolean>)): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
-        const lastMessage = body.messages[body.messages.length - 1];
-        if (lastMessage?.role !== 'user' && lastMessage?.role !== 'tool') {
-            if (!userMessages)
-                throw new Error('Last message must not be from the assistant.');
-            if (!body.continue_final_message) {
-                const userMessage = await userMessages.next();
-                if (userMessage.done)
-                    throw new Error('No user message provided for last message.');
-                body.messages.push(...userMessage.value);
+        const ensureLastMessageIsUserOrToolMessage = async () => {
+            while (true) {
+                const lastMessage = body.messages[body.messages.length - 1];
+                if (lastMessage?.role === 'user' || lastMessage?.role === 'tool')
+                    break;
+                if (!userMessages)
+                    throw new Error('Last message must not be from the assistant.');
+                if (!body.continue_final_message) {
+                    const userMessage = await userMessages.next();
+                    if (userMessage.done)
+                        throw new Error('No user message provided for last message.');
+                    body.messages.push(...userMessage.value);
+                }
             }
-        }
+        };
 
-        let error: Error | undefined;
-        let done = false;
+        await ensureLastMessageIsUserOrToolMessage();
+
         while (true) {
+            let error: Error | undefined;
+            let done = false;
             for await (const message of this.streamChatCompletionInternal(body)) {
                 if (done) {
-                    yield message;
+                    yield undefined as any;
+                    if (userMessages) {
+                        const userMessage = await userMessages.next();
+                        if (userMessage.done)
+                            throw new Error('No assistant message provided for aborted message.');
+                        body.messages.push(...userMessage.value);
+                    }
                     break;
                 }
                 if (error)
@@ -139,17 +151,14 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 yield message;
             }
 
-            // need user message
+            // request is not two way streaming, so exit.
             if (!userMessages)
                 return;
 
-            const userMessage = await userMessages.next();
-            if (userMessage.done)
-                break;
-            body.messages.push(...userMessage.value);
-            if (body.messages[body.messages.length - 1].role === 'assistant')
-                throw new Error('Last message must be from the user or a tool.');
+            await ensureLastMessageIsUserOrToolMessage();
         }
+
+
     }
 
     async streamChatCompletion(body: ChatCompletionStreamParams, userMessages?: undefined | AsyncGenerator<ChatCompletionMessageParam[]>, callback?: null | ((chunk: OpenAI.ChatCompletionChunk) => Promise<boolean>)): Promise<any> {
