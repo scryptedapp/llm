@@ -43,7 +43,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
         // intercept time tool calls to provide a user locale time.
         if (toolCall.function.name === TimeToolFunctionName)
             return callGetTimeTool();
-        const result = await tool.callLLMTool(toolCall.id, toolCall.function.name, JSON.parse(toolCall.function.arguments));
+        const result = await tool.callLLMTool(toolCall.id, toolCall.function.name, partialParse(toolCall.function.arguments));
         return result;
     }
 
