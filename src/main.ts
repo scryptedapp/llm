@@ -110,8 +110,10 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
         let done = false;
         while (true) {
             for await (const message of this.streamChatCompletionInternal(body)) {
-                if (done)
-                    return;
+                if (done) {
+                    yield message;
+                    break;
+                }
                 if (error)
                     throw error;
                 if (message.choices[0]) {

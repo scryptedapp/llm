@@ -1,5 +1,6 @@
 import type { CallToolResult, ChatCompletionCapabilities, LLMTools, TextResourceContents } from "@scrypted/types";
 import type { OpenAI } from 'openai';
+import { partialParse } from 'openai/_vendor/partial-json-parser/parser.mjs';
 import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/resources';
 import type { ChatCompletionFunctionTool, ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 import { generate } from 'random-words';
@@ -135,7 +136,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
 
         try {
             if (tool && tc.function.arguments && tool.function.parameters) {
-                const parsed = JSON.parse(tc.function.arguments);
+                const parsed = partialParse(tc.function.arguments);
                 for (const [param, paramType] of Object.entries(tool.function.parameters.properties as any)) {
                     const value = parsed[param];
                     if (typeof value !== 'string')
