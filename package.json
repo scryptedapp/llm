@@ -68,5 +68,5 @@
       "@modelcontextprotocol/sdk": "^1.17.0",
       "jsdom": "^26.1.0"
    },
-   "version": "0.0.82"
+   "version": "0.0.83"
 }

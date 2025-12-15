@@ -22,8 +22,8 @@ const WebSearchToolsNativeId = 'search-tools';
 const modelSetting = {
     title: 'Model',
     description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
-    placeholder: 'unsloth/gemma-3-4b-it-GGUF',
-    defaultValue: 'unsloth/gemma-3-4b-it-GGUF',
+    placeholder: 'unsloth/Qwen3-VL-4B-Instruct-GGUF',
+    defaultValue: 'unsloth/Qwen3-VL-4B-Instruct-GGUF',
     combobox: true,
     choices: [
         'unsloth/gemma-3-4b-it-GGUF',
