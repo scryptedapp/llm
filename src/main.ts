@@ -16,6 +16,7 @@ import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './scrypted-tools';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
+import { checkUserId } from '@scrypted/sdk/acl';
 
 const WebSearchToolsNativeId = 'search-tools';
 
@@ -757,11 +758,58 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         return userDatabase.database;
     }
 
+    async onOpenAIEndpointRequest(request: HttpRequest, response: HttpResponse): Promise<void> {
+        const body = JSON.parse(request.body?.toString()!);
+        const { model } = body;
+        if (!request.username || (request.aclId && !await checkUserId(model, request.aclId))) {
+            return response.send('', {
+                code: 401,
+            });
+        }
+
+        const chatCompletion = sdk.systemManager.getDeviceById<ChatCompletion>(model);
+        if (!chatCompletion.interfaces.includes(ScryptedInterface.ChatCompletion)) {
+            return response.send('', {
+                code: 404,
+            });
+        }
+
+        if (body.stream) {
+            response.sendStream((async function* () {
+                const stream = await chatCompletion.streamChatCompletion(body);
+                for await (const chunk of stream) {
+                    if (chunk.object === 'chat.completion') {
+                        yield Buffer.from(`data: [DONE]\n\n`);
+                    }
+                    else {
+                        yield Buffer.from(`data: ${JSON.stringify(chunk)}\n\n`);
+                    }
+                }
+            })(), {
+                headers: {
+                    'Content-Type': 'text/event-stream; charset=utf-8',
+                },
+            });
+            return;
+        }
+
+        const completion = await chatCompletion.getChatCompletion(body);
+        response.send(JSON.stringify(completion), {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    }
+
     async onRequest(request: HttpRequest, response: HttpResponse): Promise<void> {
         if (!request.username) {
             return response.send('', {
                 code: 401,
             });
+        }
+
+        if (request.url?.startsWith('/endpoint/@scrypted/llm/api/openai/v1/chat/completions')) {
+            return await this.onOpenAIEndpointRequest(request, response);
         }
 
         if (!request.url?.startsWith('/endpoint/@scrypted/llm/token')) {
