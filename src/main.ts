@@ -2,6 +2,7 @@ import { createAsyncQueue, Deferred } from '@scrypted/deferred';
 import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
+import crypto from 'crypto';
 import { once } from 'events';
 import { OpenAI } from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources';
@@ -287,6 +288,30 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
     }
 }
 
+// Anthropic OAuth constants
+const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_OAUTH_AUTHORIZE_URL = 'https://claude.ai/oauth/authorize';
+const ANTHROPIC_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
+const ANTHROPIC_API_BASE_URL = 'https://api.anthropic.com/v1/';
+
+const anthropicModels = [
+    'claude-sonnet-4-5-20250929',
+    'claude-opus-4-5-20250514',
+    'claude-sonnet-4-20250514',
+    'claude-haiku-4-5-20251001',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-opus-20240229',
+];
+
+// PKCE helper functions
+function generatePKCE(): { verifier: string; challenge: string } {
+    const verifier = crypto.randomBytes(32).toString('base64url');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    return { verifier, challenge };
+}
+
 class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     openaiSettings = new StorageSettings(this, {
         model: {
@@ -369,6 +394,464 @@ class OpenAIEndpoint extends BaseLLM implements Settings, ChatCompletion {
     async putSetting(key: string, value: any): Promise<void> {
         if (key in this.openaiSettings.keys) {
             await this.openaiSettings.putSetting(key, value);
+            return;
+        }
+        await this.storageSettings.putSetting(key, value);
+    }
+}
+
+interface AnthropicOAuthTokens {
+    access_token: string;
+    refresh_token: string;
+    expires_at: number;
+}
+
+class AnthropicSubscription extends BaseLLM implements Settings, ChatCompletion {
+    private pkceVerifier: string | undefined;
+    private authUrl: string | undefined;
+
+    subscriptionSettings = new StorageSettings(this, {
+        model: {
+            title: 'Model',
+            description: 'The Anthropic model to use.',
+            defaultValue: 'claude-sonnet-4-5-20250929',
+            combobox: true,
+            choices: anthropicModels,
+        },
+        authStatus: {
+            title: 'Authentication Status',
+            readonly: true,
+            mapGet: () => {
+                const tokens = this.getStoredTokens();
+                if (tokens && tokens.expires_at > Date.now()) {
+                    return 'Authenticated ✓';
+                } else if (tokens && tokens.refresh_token) {
+                    return 'Token expired - will refresh automatically';
+                }
+                return 'Not authenticated';
+            },
+        },
+        loginUrl: {
+            group: 'Authentication',
+            title: 'Login URL',
+            description: 'Open this URL in your browser to authenticate with your Anthropic Pro/Max subscription. After authorizing, copy the "code" value from the callback URL (between "code=" and "#").',
+            readonly: true,
+            mapGet: () => {
+                // Only generate new PKCE if we don't have one stored
+                // This prevents regenerating on every settings page view
+                if (!this.storage.getItem('pkce_verifier')) {
+                    this.generateAuthUrl();
+                }
+                return this.authUrl || this.storage.getItem('auth_url') || 'Error generating URL';
+            },
+            async onGet() {
+                return {
+                    hide: false,
+                };
+            },
+        },
+        regenerateUrl: {
+            group: 'Authentication',
+            title: 'Generate New Login URL',
+            type: 'button',
+            description: 'Generate a fresh login URL if the current one expired or was already used.',
+            onPut: async () => {
+                this.storage.removeItem('pkce_verifier');
+                this.storage.removeItem('oauth_state');
+                this.storage.removeItem('auth_url');
+                this.generateAuthUrl();
+                this.console.log('Generated new login URL. Copy the URL from the Login URL field above.');
+            },
+        },
+        authorizationCode: {
+            group: 'Authentication',
+            title: 'Authorization Code',
+            description: 'After authorizing, paste the full callback URL or just the code. The callback URL looks like: https://console.anthropic.com/oauth/code/callback?code=XXXX#state=...',
+            placeholder: 'Paste full callback URL or just the code...',
+            onPut: async (oldValue, newValue) => {
+                if (newValue) {
+                    await this.exchangeCodeForTokens(newValue);
+                    // Clear the code after exchange
+                    this.subscriptionSettings.values.authorizationCode = '';
+                }
+            },
+        },
+        logoutButton: {
+            group: 'Authentication',
+            title: 'Logout',
+            type: 'button',
+            description: 'Clear stored authentication tokens.',
+            onPut: async () => {
+                this.clearTokens();
+                this.console.log('Logged out of Anthropic subscription.');
+            },
+        },
+    });
+
+    get functionCalls(): boolean {
+        return false;
+    }
+
+    private getStoredTokens(): AnthropicOAuthTokens | null {
+        const stored = this.storage.getItem('oauth_tokens');
+        if (!stored) return null;
+        try {
+            return JSON.parse(stored);
+        } catch {
+            return null;
+        }
+    }
+
+    private storeTokens(tokens: AnthropicOAuthTokens): void {
+        this.storage.setItem('oauth_tokens', JSON.stringify(tokens));
+    }
+
+    private clearTokens(): void {
+        this.storage.removeItem('oauth_tokens');
+        this.storage.removeItem('pkce_verifier');
+        this.storage.removeItem('oauth_state');
+        this.storage.removeItem('auth_url');
+        this.pkceVerifier = undefined;
+        this.authUrl = undefined;
+    }
+
+    private generateAuthUrl(): void {
+        const pkce = generatePKCE();
+        this.pkceVerifier = pkce.verifier;
+
+        const state = crypto.randomBytes(16).toString('hex');
+        this.storage.setItem('oauth_state', state);
+        this.storage.setItem('pkce_verifier', pkce.verifier);
+
+        const params = new URLSearchParams({
+            code: 'true',
+            client_id: ANTHROPIC_CLIENT_ID,
+            response_type: 'code',
+            redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
+            scope: 'org:create_api_key user:profile user:inference',
+            code_challenge: pkce.challenge,
+            code_challenge_method: 'S256',
+            state: state,
+        });
+
+        this.authUrl = `${ANTHROPIC_OAUTH_AUTHORIZE_URL}?${params.toString()}`;
+        this.storage.setItem('auth_url', this.authUrl);
+    }
+
+    private async exchangeCodeForTokens(code: string): Promise<void> {
+        // Retrieve PKCE verifier from storage (in case of page refresh)
+        const pkceVerifier = this.pkceVerifier || this.storage.getItem('pkce_verifier');
+        if (!pkceVerifier) {
+            throw new Error('No PKCE verifier found. Please click "Generate New Login URL" and try again.');
+        }
+
+        const state = this.storage.getItem('oauth_state');
+
+        // Clean up the code - remove any URL parts if user pasted full URL
+        let cleanCode = code.trim();
+        // If user pasted full callback URL, extract the code
+        if (cleanCode.includes('code=')) {
+            const match = cleanCode.match(/code=([^#&]+)/);
+            if (match) {
+                cleanCode = match[1];
+            }
+        }
+        // If code contains #, take only the part before it
+        if (cleanCode.includes('#')) {
+            cleanCode = cleanCode.split('#')[0];
+        }
+        // URL decode in case it's encoded
+        cleanCode = decodeURIComponent(cleanCode);
+
+        this.console.log(`Exchanging code (length: ${cleanCode.length}, first 10 chars: ${cleanCode.substring(0, 10)}...)`);
+        this.console.log(`Using PKCE verifier (length: ${pkceVerifier.length})`);
+        this.console.log(`State: ${state}`);
+
+        const requestBody = {
+            code: cleanCode,
+            state: state,
+            grant_type: 'authorization_code',
+            client_id: ANTHROPIC_CLIENT_ID,
+            redirect_uri: ANTHROPIC_OAUTH_REDIRECT_URI,
+            code_verifier: pkceVerifier,
+        };
+
+        this.console.log(`Request body: ${JSON.stringify(requestBody, null, 2)}`);
+
+        try {
+            const response = await fetch(ANTHROPIC_OAUTH_TOKEN_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                this.console.error(`Token exchange response: ${response.status}`);
+                this.console.error(`Error response: ${errorText}`);
+                throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
+            }
+
+            const data = await response.json() as {
+                access_token: string;
+                refresh_token: string;
+                expires_in: number;
+            };
+
+            const tokens: AnthropicOAuthTokens = {
+                access_token: data.access_token,
+                refresh_token: data.refresh_token,
+                expires_at: Date.now() + (data.expires_in * 1000),
+            };
+
+            this.storeTokens(tokens);
+            this.pkceVerifier = undefined;
+            this.storage.removeItem('oauth_state');
+            this.storage.removeItem('pkce_verifier');
+            this.storage.removeItem('auth_url');
+
+            this.console.log('Successfully authenticated with Anthropic subscription!');
+        } catch (e) {
+            this.console.error(`Authentication failed: ${e}`);
+            throw e;
+        }
+    }
+
+    private async refreshTokens(): Promise<AnthropicOAuthTokens> {
+        const tokens = this.getStoredTokens();
+        if (!tokens?.refresh_token) {
+            throw new Error('No refresh token available. Please login again.');
+        }
+
+        const response = await fetch(ANTHROPIC_OAUTH_TOKEN_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                grant_type: 'refresh_token',
+                refresh_token: tokens.refresh_token,
+                client_id: ANTHROPIC_CLIENT_ID,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Token refresh failed: ${response.status} ${errorText}`);
+        }
+
+        const data = await response.json() as {
+            access_token: string;
+            refresh_token: string;
+            expires_in: number;
+        };
+
+        const newTokens: AnthropicOAuthTokens = {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at: Date.now() + (data.expires_in * 1000),
+        };
+
+        this.storeTokens(newTokens);
+        return newTokens;
+    }
+
+    private async getValidAccessToken(): Promise<string> {
+        let tokens = this.getStoredTokens();
+
+        if (!tokens) {
+            throw new Error('Not authenticated. Please login with your Anthropic subscription.');
+        }
+
+        // Refresh if expired or expiring within 5 minutes
+        if (tokens.expires_at < Date.now() + 5 * 60 * 1000) {
+            tokens = await this.refreshTokens();
+        }
+
+        return tokens.access_token;
+    }
+
+    // Required system message for OAuth tokens to work
+    private readonly CLAUDE_CODE_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+    private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system: string; messages: any[] } {
+        let system = this.CLAUDE_CODE_SYSTEM;
+        const anthropicMessages: any[] = [];
+
+        for (const msg of messages) {
+            if (msg.role === 'system') {
+                // Prepend required system message
+                const content = typeof msg.content === 'string' ? msg.content : '';
+                system = `${this.CLAUDE_CODE_SYSTEM}\n\n${content}`;
+            } else if (msg.role === 'user' || msg.role === 'assistant') {
+                anthropicMessages.push({
+                    role: msg.role,
+                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                });
+            }
+        }
+
+        return { system, messages: anthropicMessages };
+    }
+
+    private convertToOpenAIResponse(anthropicResponse: any): OpenAI.Chat.Completions.ChatCompletion {
+        const content = anthropicResponse.content?.[0]?.text || '';
+        return {
+            id: anthropicResponse.id || `chatcmpl-${Date.now()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: anthropicResponse.model,
+            choices: [{
+                index: 0,
+                message: {
+                    role: 'assistant',
+                    content: content,
+                    refusal: null,
+                },
+                finish_reason: anthropicResponse.stop_reason === 'end_turn' ? 'stop' : 'stop',
+                logprobs: null,
+            }],
+            usage: {
+                prompt_tokens: anthropicResponse.usage?.input_tokens || 0,
+                completion_tokens: anthropicResponse.usage?.output_tokens || 0,
+                total_tokens: (anthropicResponse.usage?.input_tokens || 0) + (anthropicResponse.usage?.output_tokens || 0),
+            },
+        };
+    }
+
+    async * streamChatCompletionInternal(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
+        const accessToken = await this.getValidAccessToken();
+        const model = body.model || this.subscriptionSettings.values.model;
+        const { system, messages } = this.convertToAnthropicMessages(body.messages);
+
+        this.console.log(`Making Anthropic API call with OAuth token (first 20 chars: ${accessToken.substring(0, 20)}...)`);
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'oauth-2025-04-20',
+            },
+            body: JSON.stringify({
+                model,
+                max_tokens: body.max_tokens || 4096,
+                system,
+                messages,
+                stream: true,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            this.console.error(`Anthropic API error: ${response.status} ${errorText}`);
+            throw new Error(`${response.status} ${errorText}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullContent = '';
+        const completionId = `chatcmpl-${Date.now()}`;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(data);
+                        if (event.type === 'content_block_delta' && event.delta?.text) {
+                            fullContent += event.delta.text;
+                            yield {
+                                id: completionId,
+                                object: 'chat.completion.chunk',
+                                created: Math.floor(Date.now() / 1000),
+                                model,
+                                choices: [{
+                                    index: 0,
+                                    delta: { content: event.delta.text },
+                                    finish_reason: null,
+                                    logprobs: null,
+                                }],
+                            } as OpenAI.Chat.Completions.ChatCompletionChunk;
+                        }
+                    } catch (e) {
+                        // Skip invalid JSON
+                    }
+                }
+            }
+        }
+
+        // Final completion message
+        yield {
+            id: completionId,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content: fullContent, refusal: null },
+                finish_reason: 'stop',
+                logprobs: null,
+            }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        } as OpenAI.Chat.Completions.ChatCompletion;
+    }
+
+    async getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+        const accessToken = await this.getValidAccessToken();
+        const model = body.model || this.subscriptionSettings.values.model;
+        const { system, messages } = this.convertToAnthropicMessages(body.messages);
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'oauth-2025-04-20',
+            },
+            body: JSON.stringify({
+                model,
+                max_tokens: body.max_tokens || 4096,
+                system,
+                messages,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            this.console.error(`Anthropic API error: ${response.status} ${errorText}`);
+            throw new Error(`${response.status} ${errorText}`);
+        }
+
+        const anthropicResponse = await response.json();
+        return this.convertToOpenAIResponse(anthropicResponse);
+    }
+
+    async getSettings(): Promise<Setting[]> {
+        return [
+            ...await this.subscriptionSettings.getSettings(),
+            ...await this.storageSettings.getSettings()];
+    }
+
+    async putSetting(key: string, value: any): Promise<void> {
+        if (key in this.subscriptionSettings.keys) {
+            await this.subscriptionSettings.putSetting(key, value);
             return;
         }
         await this.storageSettings.putSetting(key, value);
@@ -892,7 +1375,10 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         const randomHex = Math.random().toString(16).slice(2, 10);
         if (!settings.type)
             throw new Error('Type is required to create a device.');
-        if (settings.type === 'OpenAI Server') {
+        if (settings.type === 'Anthropic Subscription') {
+            return await this.reportDevice('anthropic-sub-' + randomHex, settings.name as string);
+        }
+        else if (settings.type === 'OpenAI Server') {
             return await this.reportDevice('openai-' + randomHex, settings.name as string);
         }
         else if (settings.type === 'MCP Server') {
@@ -938,8 +1424,9 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
             },
             type: {
                 title: 'Type',
-                type: 'radiopanel',
+                description: 'Select the type of LLM provider to create.',
                 choices: [
+                    'Anthropic Subscription',
                     'OpenAI Server',
                     'llama.cpp',
                     'MCP Server',
@@ -959,6 +1446,12 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
             return new WebSearchTools(nativeId);
         }
 
+        if (nativeId?.startsWith('anthropic-sub-')) {
+            found = new AnthropicSubscription(nativeId);
+            this.devices.set(nativeId, found);
+            this.reportDevice(nativeId, found.name!);
+            return found;
+        }
         if (nativeId?.startsWith('openai-')) {
             found = new OpenAIEndpoint(nativeId);
             this.devices.set(nativeId, found);
