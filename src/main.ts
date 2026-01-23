@@ -1420,7 +1420,7 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
             name: {
                 title: 'Name',
                 description: 'The friendly name of the LLM provider or local model.',
-                placeholder: 'Claude',
+                placeholder: 'OpenAI',
             },
             type: {
                 title: 'Type',
