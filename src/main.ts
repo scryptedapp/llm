@@ -296,10 +296,10 @@ const ANTHROPIC_OAUTH_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/c
 const ANTHROPIC_API_BASE_URL = 'https://api.anthropic.com/v1/';
 
 const anthropicModels = [
+    'claude-sonnet-4-5-20250929',
     'claude-opus-4-5-20250514',
-    'claude-sonnet-4-5-20250514',
     'claude-sonnet-4-20250514',
-    'claude-haiku-4-20250514',
+    'claude-haiku-4-5-20251001',
     'claude-3-5-sonnet-20241022',
     'claude-3-5-haiku-20241022',
     'claude-3-opus-20240229',
@@ -414,7 +414,7 @@ class AnthropicSubscription extends BaseLLM implements Settings, ChatCompletion 
         model: {
             title: 'Model',
             description: 'The Anthropic model to use.',
-            defaultValue: 'claude-sonnet-4-20250514',
+            defaultValue: 'claude-sonnet-4-5-20250929',
             combobox: true,
             choices: anthropicModels,
         },
@@ -673,50 +673,174 @@ class AnthropicSubscription extends BaseLLM implements Settings, ChatCompletion 
         return tokens.access_token;
     }
 
+    // Required system message for OAuth tokens to work
+    private readonly CLAUDE_CODE_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+    private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system: string; messages: any[] } {
+        let system = this.CLAUDE_CODE_SYSTEM;
+        const anthropicMessages: any[] = [];
+
+        for (const msg of messages) {
+            if (msg.role === 'system') {
+                // Prepend required system message
+                const content = typeof msg.content === 'string' ? msg.content : '';
+                system = `${this.CLAUDE_CODE_SYSTEM}\n\n${content}`;
+            } else if (msg.role === 'user' || msg.role === 'assistant') {
+                anthropicMessages.push({
+                    role: msg.role,
+                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+                });
+            }
+        }
+
+        return { system, messages: anthropicMessages };
+    }
+
+    private convertToOpenAIResponse(anthropicResponse: any): OpenAI.Chat.Completions.ChatCompletion {
+        const content = anthropicResponse.content?.[0]?.text || '';
+        return {
+            id: anthropicResponse.id || `chatcmpl-${Date.now()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: anthropicResponse.model,
+            choices: [{
+                index: 0,
+                message: {
+                    role: 'assistant',
+                    content: content,
+                    refusal: null,
+                },
+                finish_reason: anthropicResponse.stop_reason === 'end_turn' ? 'stop' : 'stop',
+                logprobs: null,
+            }],
+            usage: {
+                prompt_tokens: anthropicResponse.usage?.input_tokens || 0,
+                completion_tokens: anthropicResponse.usage?.output_tokens || 0,
+                total_tokens: (anthropicResponse.usage?.input_tokens || 0) + (anthropicResponse.usage?.output_tokens || 0),
+            },
+        };
+    }
+
     async * streamChatCompletionInternal(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk | OpenAI.Chat.Completions.ChatCompletion> {
         const accessToken = await this.getValidAccessToken();
+        const model = body.model || this.subscriptionSettings.values.model;
+        const { system, messages } = this.convertToAnthropicMessages(body.messages);
 
-        const client = new OpenAI({
-            baseURL: ANTHROPIC_API_BASE_URL,
-            apiKey: accessToken,
-            defaultHeaders: {
-                'anthropic-beta': 'oauth-2025-01-01',
+        this.console.log(`Making Anthropic API call with OAuth token (first 20 chars: ${accessToken.substring(0, 20)}...)`);
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'oauth-2025-04-20',
             },
+            body: JSON.stringify({
+                model,
+                max_tokens: body.max_tokens || 4096,
+                system,
+                messages,
+                stream: true,
+            }),
         });
 
-        body.model ||= this.subscriptionSettings.values.model;
-        for (const message of body.messages) {
-            for (const k in message) {
-                // @ts-expect-error
-                if (message[k] === undefined || message[k] === null) {
-                    // @ts-expect-error
-                    delete message[k];
+        if (!response.ok) {
+            const errorText = await response.text();
+            this.console.error(`Anthropic API error: ${response.status} ${errorText}`);
+            throw new Error(`${response.status} ${errorText}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullContent = '';
+        const completionId = `chatcmpl-${Date.now()}`;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+
+                    try {
+                        const event = JSON.parse(data);
+                        if (event.type === 'content_block_delta' && event.delta?.text) {
+                            fullContent += event.delta.text;
+                            yield {
+                                id: completionId,
+                                object: 'chat.completion.chunk',
+                                created: Math.floor(Date.now() / 1000),
+                                model,
+                                choices: [{
+                                    index: 0,
+                                    delta: { content: event.delta.text },
+                                    finish_reason: null,
+                                    logprobs: null,
+                                }],
+                            } as OpenAI.Chat.Completions.ChatCompletionChunk;
+                        }
+                    } catch (e) {
+                        // Skip invalid JSON
+                    }
                 }
             }
         }
-        const stream = client.chat.completions.stream(body);
-        for await (const chunk of stream) {
-            yield chunk;
-        }
-        const last = await stream.finalChatCompletion();
-        yield last;
+
+        // Final completion message
+        yield {
+            id: completionId,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content: fullContent, refusal: null },
+                finish_reason: 'stop',
+                logprobs: null,
+            }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        } as OpenAI.Chat.Completions.ChatCompletion;
     }
 
     async getChatCompletion(body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming): Promise<OpenAI.Chat.Completions.ChatCompletion> {
         const accessToken = await this.getValidAccessToken();
+        const model = body.model || this.subscriptionSettings.values.model;
+        const { system, messages } = this.convertToAnthropicMessages(body.messages);
 
-        const client = new OpenAI({
-            baseURL: ANTHROPIC_API_BASE_URL,
-            apiKey: accessToken,
-            defaultHeaders: {
-                'anthropic-beta': 'oauth-2025-01-01',
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'oauth-2025-04-20',
             },
+            body: JSON.stringify({
+                model,
+                max_tokens: body.max_tokens || 4096,
+                system,
+                messages,
+            }),
         });
 
-        body.model ||= this.subscriptionSettings.values.model;
+        if (!response.ok) {
+            const errorText = await response.text();
+            this.console.error(`Anthropic API error: ${response.status} ${errorText}`);
+            throw new Error(`${response.status} ${errorText}`);
+        }
 
-        const completion = await client.chat.completions.create(body);
-        return completion;
+        const anthropicResponse = await response.json();
+        return this.convertToOpenAIResponse(anthropicResponse);
     }
 
     async getSettings(): Promise<Setting[]> {
