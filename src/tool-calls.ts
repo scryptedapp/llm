@@ -27,23 +27,28 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
 
     const toolTuples = (await Promise.allSettled(toolsPromises)).map(r => r.status === 'fulfilled' ? r.value : []).flat();
     const map: Record<string, LLMTools> = {};
-    // Used to deduplciate tools that are provided by multiple LLMTools implementations like get-time.
+    // Used to deduplciate tools that are provided by multiple LLMTools implementations like get_time.
     const toolMap: Record<string, ChatCompletionTool> = {};
+    const originalNames = new Map<string, string>();
     for (const entry of toolTuples) {
-        map[entry.tool.function.name] = entry.llmTools;
-        toolMap[entry.tool.function.name] = entry.tool;
+        const noDashName = entry.tool.function.name.replace('-', '_');
+        originalNames.set(noDashName, entry.tool.function.name);
+        entry.tool.function.name = noDashName;
+        map[noDashName] = entry.llmTools;
+        toolMap[noDashName] = entry.tool;
     }
 
     const tools = Object.values(toolMap);
 
     const toolCall = async (toolCall: OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall) => {
         const tool = map[toolCall.function.name];
-        if (!tool)
+        const originalName = originalNames.get(toolCall.function.name);
+        if (!tool || !originalName)
             throw new Error(`Tool ${toolCall} not found.`);
         // intercept time tool calls to provide a user locale time.
-        if (toolCall.function.name === TimeToolFunctionName)
+        if (originalName === TimeToolFunctionName)
             return callGetTimeTool();
-        const result = await tool.callLLMTool(toolCall.id, toolCall.function.name, partialParse(toolCall.function.arguments));
+        const result = await tool.callLLMTool(toolCall.id, originalName, partialParse(toolCall.function.arguments));
         return result;
     }
 
