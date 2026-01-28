@@ -31,7 +31,7 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     const toolMap: Record<string, ChatCompletionTool> = {};
     const originalNames = new Map<string, string>();
     for (const entry of toolTuples) {
-        const noDashName = entry.tool.function.name.replace('-', '_');
+        const noDashName = entry.tool.function.name.replaceAll('-', '_');
         originalNames.set(noDashName, entry.tool.function.name);
         entry.tool.function.name = noDashName;
         map[noDashName] = entry.llmTools;
