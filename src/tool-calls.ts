@@ -32,6 +32,9 @@ export async function prepareTools(allLLMTools: LLMTools[]) {
     const originalNames = new Map<string, string>();
     for (const entry of toolTuples) {
         const noDashName = entry.tool.function.name.replaceAll('-', '_');
+        if (noDashName !== entry.tool.function.name) {
+            console.warn(`Renaming tool function ${entry.tool.function.name} to ${noDashName} to avoid dashes in function names. Update your tool name to ensure the are valid.`);
+        }
         originalNames.set(noDashName, entry.tool.function.name);
         entry.tool.function.name = noDashName;
         map[noDashName] = entry.llmTools;
