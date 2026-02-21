@@ -50,6 +50,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 'imageGeneration',
                 'audio',
                 'audioGeneration',
+                'reasoning',
             ],
             onPut: () => {
                 const capabilities: ChatCompletionCapabilities = {};
