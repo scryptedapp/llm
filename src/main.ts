@@ -496,7 +496,10 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
             choices: [
                 'Default',
                 'cpu',
-                'cuda',
+                'cuda-12.4',
+                'cuda-13.1',
+                'rocm-7.2',
+                'hip-radeon',
                 'sycl',
                 'vulkan',
             ],

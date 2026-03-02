@@ -4,9 +4,10 @@ import fs from 'fs';
 import { IncomingMessage } from 'http';
 import os from 'os';
 import path from 'path';
+import { extract } from 'tar';
 import yauzl from 'yauzl';
 
-export const llamaVersion = 'b6910';
+export const llamaVersion = 'b8184';
 
 
 export const hasCUDA = (process.platform === 'linux' && process.env.NVIDIA_VISIBLE_DEVICES && process.env.NVIDIA_DRIVER_CAPABILITIES)
@@ -26,76 +27,36 @@ function getBinarySuffix(backend?: string) {
     if (backend)
         return `-${backend}`;
 
-    if (hasCUDA)
-        return `-cuda`;
-    if (hasIntel)
-        return `-sycl`;
+    // cuda now has 12.4 and 13.1 suffixes (windows only)
+    // if (hasCUDA)
+    //     return `-cuda`;
+
+    // sycl seems broken on llama.cpp
+    // also is unmaintained, and vulkan is now just as fast.
+    // if (hasIntel)
+    //     return `-sycl`;
     return `-vulkan`;
 }
 
-export function getBinaryUrl(suffix: string, version?: string) {
+function getArchiveExtension(): string {
+    // Windows uses .zip, macOS/Linux use .tar.gz
+    return process.platform === 'win32' ? '.zip' : '.tar.gz';
+}
+
+export function getBinaryUrl(suffix: string, version?: string): string {
     const effectiveVersion = version || llamaVersion;
-    // https://github.com/scryptedapp/llm/releases/download/b6910/llama-b6910-bin-ubuntu-sycl-x64.zip
-    // https://github.com/ggml-org/llama.cpp/releases/download/b7210/llama-b7210-bin-macos-x64.zip
-    const orgRepo = suffix === '-sycl' ? 'scryptedapp/llm' : 'ggml-org/llama.cpp';
+    // const orgRepo = suffix === '-sycl' ? 'scryptedapp/llm' : 'ggml-org/llama.cpp';
+    const orgRepo = 'ggml-org/llama.cpp';
     const platform = process.platform === 'linux'
         ? 'ubuntu'
         : process.platform === 'darwin'
             ? 'macos'
             : process.platform;
-    return `https://github.com/${orgRepo}/releases/download/${effectiveVersion}/llama-${effectiveVersion}-bin-${platform}${suffix}-${process.arch}.zip`;
+    const extension = getArchiveExtension();
+    return `https://github.com/${orgRepo}/releases/download/${effectiveVersion}/llama-${effectiveVersion}-bin-${platform}${suffix}-${process.arch}${extension}`;
 }
 
-export async function downloadLLama(backend?: string, version?: string) {
-    version ||= llamaVersion;
-    const suffix = getBinarySuffix(backend);
-    const versionPath = `v${version}${suffix || '-default'}`;
-    const llamaDownloadPath = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, versionPath);
-
-
-    // Prefix the binary path with the backend if specified
-    let llamaBinary = path.join(llamaDownloadPath, 'build', 'bin', 'llama-server');
-    if (process.platform === 'win32') {
-        llamaBinary += '.exe';
-    }
-
-    console.warn(`Using llama.cpp binary download path ${llamaBinary}`);
-
-    if (fs.existsSync(llamaBinary)) {
-        return llamaBinary;
-    }
-
-    const cwd = llamaDownloadPath || process.cwd();
-    await fs.promises.mkdir(cwd, { recursive: true });
-    const buildPath = path.join(cwd, 'build');
-    const extractPath = path.join(cwd, '.extract');
-    try {
-        await fs.promises.rm(extractPath, { recursive: true, force: true });
-    }
-    catch (e) {
-        const oldExtractPath = path.join(cwd, '.extract-old');
-        fs.promises.rm(oldExtractPath, { recursive: true, force: true });
-        await fs.promises.rename(extractPath, oldExtractPath);
-    }
-    await fs.promises.mkdir(extractPath, { recursive: true });
-    await fs.promises.rm(buildPath, { recursive: true, force: true });
-    const binaryUrl = getBinaryUrl(suffix, version);
-    console.warn(`Downloading llama.cpp binary from ${binaryUrl}`);
-    const r = https.get(binaryUrl, {
-        family: 4,
-    });
-    const [response] = await once(r, 'response') as [IncomingMessage];
-    if (!response.statusCode || (response.statusCode < 200 && response.statusCode >= 300))
-        throw new Error(`Failed to download libav binary: ${response.statusCode}`);
-
-    const buffers: Buffer[] = [];
-    response.on('data', (chunk: Buffer) => {
-        buffers.push(chunk);
-    });
-    await once(response, 'end');
-
-    const buffer = Buffer.concat(buffers);
-
+async function extractZip(buffer: Buffer, extractPath: string): Promise<void> {
     // Open the zip file
     const zip = await new Promise<yauzl.ZipFile>((resolve, reject) => {
         yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zipfile) => {
@@ -203,8 +164,83 @@ export async function downloadLLama(backend?: string, version?: string) {
         // Start reading entries
         zip.readEntry();
     });
+}
 
-    await fs.promises.rename(path.join(extractPath, 'build'), buildPath);
+async function extractTarGz(buffer: Buffer, extractPath: string): Promise<void> {
+    console.log(`Extracting tar.gz to ${extractPath}`);
+    const extractStream = extract({
+        cwd: extractPath,
+        gzip: true,
+    });
+
+    return new Promise((resolve, reject) => {
+        extractStream.on('end', resolve);
+        extractStream.on('error', reject);
+        extractStream.on('finish', resolve);
+        extractStream.end(buffer);
+    });
+}
+
+export async function downloadLLama(backend?: string, version?: string) {
+    version ||= llamaVersion;
+    const suffix = getBinarySuffix(backend);
+    const versionPath = `v${version}${suffix || '-default'}`;
+    const llamaDownloadPath = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, versionPath);
+
+
+    // Prefix the binary path with the backend if specified
+    let llamaBinary = path.join(llamaDownloadPath, 'build', `llama-${version}`, 'llama-server');
+    if (process.platform === 'win32') {
+        llamaBinary += '.exe';
+    }
+
+    console.warn(`Using llama.cpp binary download path ${llamaBinary}`);
+
+    if (fs.existsSync(llamaBinary)) {
+        return llamaBinary;
+    }
+
+    const cwd = llamaDownloadPath || process.cwd();
+    await fs.promises.mkdir(cwd, { recursive: true });
+    const buildPath = path.join(cwd, 'build');
+    const extractPath = path.join(cwd, '.extract');
+    try {
+        await fs.promises.rm(extractPath, { recursive: true, force: true });
+    }
+    catch (e) {
+        const oldExtractPath = path.join(cwd, '.extract-old');
+        fs.promises.rm(oldExtractPath, { recursive: true, force: true });
+        await fs.promises.rename(extractPath, oldExtractPath);
+    }
+    await fs.promises.mkdir(extractPath, { recursive: true });
+    await fs.promises.rm(buildPath, { recursive: true, force: true });
+    const binaryUrl = getBinaryUrl(suffix, version);
+    console.warn(`Downloading llama.cpp binary from ${binaryUrl}`);
+    const r = https.get(binaryUrl, {
+        family: 4,
+    });
+    const [response] = await once(r, 'response') as [IncomingMessage];
+    if (!response.statusCode || (response.statusCode < 200 && response.statusCode >= 300))
+        throw new Error(`Failed to download libav binary: ${response.statusCode}`);
+
+    const buffers: Buffer[] = [];
+    response.on('data', (chunk: Buffer) => {
+        buffers.push(chunk);
+    });
+    await once(response, 'end');
+
+    const buffer = Buffer.concat(buffers);
+
+    // Extract based on platform
+    const extension = getArchiveExtension();
+    if (extension === '.zip') {
+        await extractZip(buffer, extractPath);
+    } else {
+        await extractTarGz(buffer, extractPath);
+    }
+
+    await fs.promises.rename(extractPath, buildPath);
+    console.warn(`llama.cpp binary extracted to ${buildPath}`);
 
     if (!fs.existsSync(llamaBinary))
         throw new Error("error occured downloading llama binary.");
