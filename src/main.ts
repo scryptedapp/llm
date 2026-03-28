@@ -1,39 +1,37 @@
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
 import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
+import { checkUserId } from '@scrypted/sdk/acl';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
 import { once } from 'events';
 import { OpenAI } from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources';
-import type { ChatCompletionAssistantMessageParam, ParsedChatCompletion, ParsedChatCompletionMessage } from 'openai/resources/chat/completions';
+import type { ParsedChatCompletion } from 'openai/resources/chat/completions';
 import path from 'path';
 import { createInterface } from 'readline';
 import { PassThrough } from 'stream';
 import { downloadLLama, llamaVersion } from './download-llama';
 import { LLMUserMixin } from './llm-user';
 import { MCPServer } from './mcp-server';
-import { handleToolCalls, prepareTools } from './tool-calls';
 import { ScryptedTools } from './scrypted-tools';
+import { handleToolCalls, prepareTools } from './tool-calls';
 import { Database, UserDatabase } from './user-database';
 import { WebSearchTools } from './web-search-tools';
-import { checkUserId } from '@scrypted/sdk/acl';
 
 const WebSearchToolsNativeId = 'search-tools';
 
 const modelSetting = {
     title: 'Model',
     description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
-    placeholder: 'unsloth/Qwen3-VL-4B-Instruct-GGUF',
-    defaultValue: 'unsloth/Qwen3-VL-4B-Instruct-GGUF',
+    placeholder: 'unsloth/Qwen3.5-4B-GGUF',
+    defaultValue: 'unsloth/Qwen3.5-4B-GGUF',
     combobox: true,
     choices: [
-        'unsloth/gemma-3-4b-it-GGUF',
-        'unsloth/gemma-3-12b-it-GGUF',
-        'unsloth/gemma-3-27b-it-GGUF',
-        'unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF',
-        'unsloth/Qwen3-VL-8B-Instruct-GGUF',
-        'unsloth/Qwen3-VL-4B-Instruct-GGUF',
-        'unsloth/Qwen3-VL-2B-Instruct-GGUF',
+        'unsloth/Qwen3.5-35B-A3B-GGUF',
+        'unsloth/Qwen3.5-27B-GGUF',
+        'unsloth/Qwen3.5-9B-GGUF',
+        'unsloth/Qwen3.5-4B-GGUF',
+        'unsloth/Qwen3.5-2B-GGUF',
     ],
 };
 
