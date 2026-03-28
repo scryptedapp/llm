@@ -188,7 +188,19 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
 
         messages.messages.push(responseMessage);
 
-        for (const content of response.content) {
+        for (let content of response.content) {
+            if (content.type === 'text' && content.text.length > 100000) {
+                const resource: TextResourceContents = {
+                    text: content.text,
+                    mimeType: 'text/plain',
+                    uri: undefined as any,
+                };
+                content = {
+                    type: 'resource',
+                    resource,
+                };
+            }
+
             if (content.type === 'image') {
                 const url = `data:${content.mimeType};base64,${content.data}`;
                 if (capabilities?.image) {
@@ -221,6 +233,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     messageStrings.push(`The image was presented to the user. The image can be used in other tools using the following URL: \`chat://${token}\`.`);
                     messages.callToolResult._meta ||= {};
                     const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                    meta.userVisible = true;
                     meta.images ||= [];
                     meta.images.push({
                         token,
@@ -232,6 +245,9 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
             }
             else if (content.type === 'audio') {
                 const url = `data:${content.mimeType};base64,${content.data}`;
+                messages.callToolResult._meta ||= {};
+                const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
+                meta.userVisible = true;
                 if (capabilities?.audio) {
                     messageStrings.push('The next user message will include the audio.');
                     messages.messages.push({
@@ -247,8 +263,6 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                         content: `Audio file is available at: \`chat://${token}\``,
                     });
 
-                    messages.callToolResult._meta ||= {};
-                    const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.audio ||= [];
                     meta.audio.push({
                         token,
@@ -258,8 +272,6 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                 else {
                     const token = (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
                     messageStrings.push(`The audio was presented to the user. The audio can be used in other tools using the following URL: \`chat://${token}\`.`);
-                    messages.callToolResult._meta ||= {};
-                    const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                     meta.audio ||= [];
                     meta.audio.push({
                         token,
