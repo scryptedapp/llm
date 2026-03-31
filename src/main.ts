@@ -16,7 +16,9 @@ import { MCPServer } from './mcp-server';
 import { ScryptedTools } from './scrypted-tools';
 import { handleToolCalls, prepareTools } from './tool-calls';
 import { Database, UserDatabase } from './user-database';
+import { WebSearchTools } from './web-search-tools';
 
+const WebSearchToolsNativeId = 'search-tools';
 
 const modelSetting = {
     title: 'Model',
@@ -712,11 +714,15 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         if (sdk.deviceManager.getNativeIds().includes('camera-tools'))
             sdk.deviceManager.onDeviceRemoved('camera-tools');
 
-        const WebSearchToolsNativeId = 'search-tools';
-
-        if (sdk.deviceManager.getNativeIds().includes(WebSearchToolsNativeId)) {
-            sdk.deviceManager.onDeviceRemoved(WebSearchToolsNativeId);
-        }
+        sdk.deviceManager.onDeviceDiscovered({
+            nativeId: WebSearchToolsNativeId,
+            name: 'Search Tools',
+            type: 'LLMTools',
+            interfaces: [
+                ScryptedInterface.LLMTools,
+                ScryptedInterface.Settings,
+            ],
+        });
 
         this.updateCors();
     }
@@ -950,6 +956,10 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         let found = this.devices.get(nativeId);
         if (found)
             return found;
+
+        if (nativeId === WebSearchToolsNativeId) {
+            return new WebSearchTools(nativeId);
+        }
 
         if (nativeId?.startsWith('openai-')) {
             found = new OpenAIEndpoint(nativeId);
