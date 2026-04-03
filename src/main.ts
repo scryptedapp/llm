@@ -23,8 +23,8 @@ const WebToolsNativeId = 'search-tools';
 const modelSetting = {
     title: 'Model',
     description: 'The hugging face model to use for the llama.cpp server. Optional: may include a tag of a specific quantization.',
-    placeholder: 'unsloth/Qwen3.5-4B-GGUF',
-    defaultValue: 'unsloth/Qwen3.5-4B-GGUF',
+    placeholder: 'unsloth/gemma-4-E4B-it-GGUF',
+    defaultValue: 'unsloth/gemma-4-E4B-it-GGUF',
     combobox: true,
     choices: [
         'unsloth/Qwen3.5-35B-A3B-GGUF',
@@ -32,9 +32,12 @@ const modelSetting = {
         'unsloth/Qwen3.5-9B-GGUF',
         'unsloth/Qwen3.5-4B-GGUF',
         'unsloth/Qwen3.5-2B-GGUF',
+        'unsloth/gemma-4-31B-it-GGUF',
+        'unsloth/gemma-4-26B-A4B-it-GGUF',
+        'unsloth/gemma-4-E4B-it-GGUF',
+        'unsloth/gemma-4-E2B-it-GGUF',
     ],
 };
-
 abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffer>, TTY, ChatCompletion {
     storageSettings = new StorageSettings(this, {
         chatCompletionCapabilities: {

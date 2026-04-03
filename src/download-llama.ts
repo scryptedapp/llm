@@ -7,7 +7,7 @@ import path from 'path';
 import { extract } from 'tar';
 import yauzl from 'yauzl';
 
-export const llamaVersion = 'b8184';
+export const llamaVersion = 'b8648';
 
 
 export const hasCUDA = (process.platform === 'linux' && process.env.NVIDIA_VISIBLE_DEVICES && process.env.NVIDIA_DRIVER_CAPABILITIES)
