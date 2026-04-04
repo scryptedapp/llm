@@ -1,5 +1,6 @@
+import fs from 'fs';
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
-import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
+import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, SettingValue, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
 import { checkUserId } from '@scrypted/sdk/acl';
 import { StorageSettings } from '@scrypted/sdk/storage-settings';
 import child_process from 'child_process';
@@ -696,12 +697,49 @@ class LlamaCPP extends BaseLLM implements OnOff, ChatCompletion {
     }
 }
 
-export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler, MixinProvider {
-    devices = new Map<ScryptedNativeId, any>();
+export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvider, DeviceCreator, UserDatabase, HttpRequestHandler, MixinProvider, Settings {
+    devices = new Map<ScryptedNativeId, ScryptedDeviceBase>();
     userDatabases = new Map<string, {
         token: string,
         database: Database,
     }>();
+
+    storageSettings = new StorageSettings(this, {
+        clearModelStorage: {
+            title: 'Clear Model Storage',
+            description: 'Clear the llama.cpp storage used by models. Enter DELETE to clear model storage on all workers.',
+            mapGet(value) {
+                return undefined;
+            },
+            onPut: async(ov, nv) => {
+                if (nv !== 'DELETE')
+                    return;
+
+                for (const device of this.devices.values()) {
+                    if (!device.nativeId?.startsWith('llama-'))
+                        continue;
+
+                    const llamaDevice = device as LlamaCPP;
+                    await llamaDevice.stopLlamaServer();
+                }
+
+                const workers = await sdk.clusterManager.getClusterWorkers();
+                for (const worker of Object.values(workers)) {
+                    const forked = sdk.fork<Awaited<ReturnType<typeof fork>>>({
+                        runtime: 'node',
+                        clusterWorkerId: worker.id,
+                    });
+
+                    forked.result.then(async r => {
+                        await r.clearModelStorage();
+                    })
+                    .finally(() => {
+                        forked.worker.terminate();
+                    });
+                }
+            }
+        }
+    });
 
     constructor(nativeId?: string) {
         super(nativeId);
@@ -727,6 +765,14 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
         });
 
         this.updateCors();
+    }
+
+    getSettings(): Promise<Setting[]> {
+        return this.storageSettings.getSettings();
+    }
+
+    putSetting(key: string, value: SettingValue): Promise<void> {
+        return this.storageSettings.putSetting(key, value);
     }
 
     async getMixin(mixinDevice: any, mixinDeviceInterfaces: ScryptedInterface[], mixinDeviceState: WritableDeviceState): Promise<any> {
@@ -989,6 +1035,13 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
 export async function fork() {
     return {
         llamaFork,
+        async clearModelStorage() {
+            const LLAMA_CACHE = path.join(process.env.SCRYPTED_PLUGIN_VOLUME!, 'llama-cache')
+            await fs.promises.rm(LLAMA_CACHE, {
+                recursive: true,
+                force: true,
+            });
+        },
         async terminate() {
             process.exit(0);
         }

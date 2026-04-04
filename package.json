@@ -30,6 +30,7 @@
       "name": "Large Language Model Plugin",
       "type": "LLM",
       "interfaces": [
+         "Settings",
          "DeviceProvider",
          "DeviceCreator",
          "HttpRequestHandler",
@@ -70,5 +71,5 @@
       "@modelcontextprotocol/sdk": "^1.17.0",
       "jsdom": "^26.1.0"
    },
-   "version": "0.0.90"
+   "version": "0.0.91"
 }
