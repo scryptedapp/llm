@@ -51,7 +51,9 @@ export function getBinaryUrl(suffix: string, version?: string): string {
         ? 'ubuntu'
         : process.platform === 'darwin'
             ? 'macos'
-            : process.platform;
+            : process.platform === 'win32'
+                ? 'win'
+                : process.platform;
     const extension = getArchiveExtension();
     return `https://github.com/${orgRepo}/releases/download/${effectiveVersion}/llama-${effectiveVersion}-bin-${platform}${suffix}-${process.arch}${extension}`;
 }
