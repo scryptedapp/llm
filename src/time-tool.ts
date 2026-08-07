@@ -1,6 +1,6 @@
 import type { CallToolResult, ChatCompletionFunctionTool } from '@scrypted/types';
 
-export const TimeToolFunctionName = 'get-time';
+export const TimeToolFunctionName = 'get_time';
 
 export function callGetTimeTool(): CallToolResult {
     const text = new Date().toLocaleString() + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone;

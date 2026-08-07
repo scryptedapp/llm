@@ -1,7 +1,7 @@
 import type { CallToolResult, ChatCompletionFunctionTool, LLMTools } from '@scrypted/types';
 import { createToolTextResult, createUnknownToolError } from './tools-common';
 
-export const EvaluateJsToolFunctionName = 'evaluate-js';
+export const EvaluateJsToolFunctionName = 'evaluate_js';
 
 // Evaluates JavaScript code in a restricted browser context
 async function evaluateJs(code: string, findChatBlob: (token: string) => any): Promise<CallToolResult> {
@@ -19,7 +19,7 @@ async function evaluateJs(code: string, findChatBlob: (token: string) => any): P
         }
         let text = JSON.stringify(result, null, 2);
         if (text.length > 10000) {
-            text = 'The evaluate-js result was too large to return in full and has been truncated significantly. Modify your script to return less data. Truncated output:\n\n' + text.substring(0, 500) + '\n\n...[truncated]';
+            text = 'The evaluate_js result was too large to return in full and has been truncated significantly. Modify your script to return less data. Truncated output:\n\n' + text.substring(0, 500) + '\n\n...[truncated]';
         }
         const ret: CallToolResult = {
             content: [

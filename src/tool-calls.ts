@@ -292,7 +292,7 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     }
                 }
                 token ||= (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
-                messageStrings.push(`The tool resource was returned. You MUST use the readChatUrl(url: string) function within the evaluate-js tool to query this data using the following URL: \`chat://${token}\`.`);
+                messageStrings.push(`The tool resource was returned. You MUST use the readChatUrl(url: string) function within the evaluate_js tool to query this data using the following URL: \`chat://${token}\`.`);
                 messages.callToolResult._meta ||= {};
                 const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                 meta.resources ||= [];

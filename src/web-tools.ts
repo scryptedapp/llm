@@ -11,7 +11,7 @@ export class WebTools extends ScryptedDeviceBase implements LLMTools {
             {
                 type: 'function',
                 function: {
-                    name: 'get-web-page-content',
+                    name: 'get_web_page_content',
                     description: 'Get the main content of a web page.',
                     parameters: {
                         "type": "object",
@@ -75,7 +75,7 @@ export class WebTools extends ScryptedDeviceBase implements LLMTools {
     }
 
     async callLLMTool(toolCallId: string, name: string, parameters: Record<string, any>) {
-        if (name === 'get-web-page-content') {
+        if (name === 'get_web_page_content') {
             return await this.getWebPageContent(parameters.url, parameters.htmlContent);
         }
         else if (name === TimeToolFunctionName) {
