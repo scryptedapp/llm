@@ -224,7 +224,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         role: 'system',
                         content: this.storageSettings.values.systemPrompt,
                     }] : [],
-                    tools: tools.tools,
+                    tools: tools.tools?.length ? tools.tools : undefined,
                     model: undefined as any,
                 }, userMessageQueue.queue)) {
                     lastAssistantMessage = token as any;
