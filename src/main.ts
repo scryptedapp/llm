@@ -205,6 +205,7 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
             catch (e) {
             }
             finally {
+                q.end();
                 i.destroy();
                 o.destroy();
                 rl.close();
