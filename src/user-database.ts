@@ -92,7 +92,12 @@ export class Database {
     async putProperty(key: string, property: string, value: any): Promise<void> {
         const str = await this.level.get(key) as string;
         const existingValue = JSON.parse(str) || {};
-        existingValue[property] = value;
+        if (value === undefined) {
+            delete existingValue[property];
+        }
+        else {
+            existingValue[property] = value;
+        }
         await this.put(key, existingValue);
     }
 
