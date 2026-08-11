@@ -111,6 +111,9 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                         throw new Error('No user message provided for last message.');
                     body.messages.push(...userMessage.value);
                 }
+                else {
+                    break;
+                }
             }
         };
 
