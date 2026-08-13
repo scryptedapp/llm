@@ -1,3 +1,4 @@
+import os from 'os';
 import fs from 'fs';
 import { createAsyncQueue, Deferred } from '@scrypted/deferred';
 import sdk, { CallToolResult, ChatCompletion, ChatCompletionCapabilities, ChatCompletionStreamParams, DeviceCreator, DeviceCreatorSettings, DeviceProvider, HttpRequest, HttpRequestHandler, HttpResponse, LLMTools, MixinProvider, OnOff, ScryptedDeviceBase, ScryptedDeviceType, ScryptedInterface, ScryptedNativeId, Setting, Settings, SettingValue, StreamService, TTY, WritableDeviceState } from '@scrypted/sdk';
@@ -28,13 +29,14 @@ const modelSetting = {
     defaultValue: 'unsloth/gemma-4-E4B-it-GGUF',
     combobox: true,
     choices: [
-        'unsloth/Qwen3.5-35B-A3B-GGUF',
-        'unsloth/Qwen3.5-27B-GGUF',
+        'unsloth/Qwen3.6-35B-A3B-GGUF',
+        'unsloth/Qwen3.6-27B-GGUF',
         'unsloth/Qwen3.5-9B-GGUF',
         'unsloth/Qwen3.5-4B-GGUF',
         'unsloth/Qwen3.5-2B-GGUF',
         'unsloth/gemma-4-31B-it-GGUF',
         'unsloth/gemma-4-26B-A4B-it-GGUF',
+        'unsloth/gemma-4-12b-it-GGUF',
         'unsloth/gemma-4-E4B-it-GGUF',
         'unsloth/gemma-4-E2B-it-GGUF',
     ],
@@ -416,6 +418,7 @@ async function llamaFork(providedPort: number, apiKey: string, model: string, ad
     if (apiKey)
         args.push('--api-key', apiKey);
 
+    console.log(os.hostname(), os.platform(), os.arch(), os.release());
     console.log('Starting llama server with args:', ...args);
 
     const cp = child_process.spawn(llamaBinary,
@@ -449,8 +452,8 @@ async function llamaFork(providedPort: number, apiKey: string, model: string, ad
     cp.stderr.on('data', (data: Buffer) => {
         const str = data.toString();
         console.error(str);
-        // main: server is listening on http://127.0.0.1:56369 - starting the main loop
-        if (str.includes('server is listening on')) {
+        // srv  llama_server: listening on http://0.0.0.0:45322
+        if (str.includes('listening on')) {
             // parse out the port
             const match = str.match(/http:\/\/\d+\.\d+\.\d+\.\d+:(\d+)/);
             const portNumber = match?.[1];
