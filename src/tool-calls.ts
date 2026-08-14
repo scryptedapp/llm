@@ -5,6 +5,7 @@ import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/
 import type { ChatCompletionFunctionTool, ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 import { generate } from 'random-words';
 import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
+import { Deferred } from "@scrypted/deferred";
 
 export async function prepareTools(allLLMTools: LLMTools[]) {
     const toolsPromises = allLLMTools.map(async llmTools => {
@@ -125,7 +126,7 @@ export function findChatBlob(token: string, history: CallToolResult[], requiredM
     return mutableValue;
 }
 
-export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, toolHistory: CallToolResult[], assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void) {
+export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTools>>, message: ParsedChatCompletionMessage<null>, toolHistory: CallToolResult[], assistantUsesFunctionCalls: boolean, capabilities?: ChatCompletionCapabilities, callingTool?: (tc: ParsedFunctionToolCall) => void, abortSignal?: AbortSignal) {
     if (!message.tool_calls)
         throw new Error('Message does not contain tool calls.');
 
@@ -167,7 +168,12 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
         }
 
         callingTool?.(tc);
-        const response = await tools.toolCall(tc);
+        const deferred = new Deferred<Awaited<ReturnType<typeof tools.toolCall>>>();
+        abortSignal?.addEventListener('abort', () => {
+            deferred.reject(new Error('Tool call aborted'));
+        });
+        deferred.resolvePromise(tools.toolCall(tc));
+        const response = await deferred.promise;
 
         const messages: ToolCallData = {
             toolCall: tc,
