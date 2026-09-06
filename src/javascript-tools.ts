@@ -19,7 +19,7 @@ async function evaluateJs(code: string, findChatBlob: (token: string) => any): P
         }
         let text = JSON.stringify(result, null, 2);
         if (text.length > 10000) {
-            text = 'The evaluate_js result was too large to return in full and has been truncated significantly. Modify your script to return less data. Truncated output:\n\n' + text.substring(0, 500) + '\n\n...[truncated]';
+            text = 'The evaluate_js result was too large to return in full and has been truncated significantly. Modify your script to return less data. If the script returned the result of readChatUrl directly, assign it to a variable, process it within the script, and return only the relevant data. Truncated output:\n\n' + text.substring(0, 500) + '\n\n...[truncated]';
         }
         const ret: CallToolResult = {
             content: [

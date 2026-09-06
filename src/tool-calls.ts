@@ -5,6 +5,7 @@ import type { ChatCompletionContentPartImage, ChatCompletionTool } from 'openai/
 import type { ChatCompletionFunctionTool, ParsedChatCompletionMessage, ParsedFunctionToolCall } from "openai/resources/chat/completions";
 import { generate } from 'random-words';
 import { callGetTimeTool, TimeToolFunctionName } from "./time-tool";
+import { EvaluateJsToolFunctionName } from "./javascript-tools";
 import { Deferred } from "@scrypted/deferred";
 
 export async function prepareTools(allLLMTools: LLMTools[]) {
@@ -298,7 +299,12 @@ export async function handleToolCalls(tools: Awaited<ReturnType<typeof prepareTo
                     }
                 }
                 token ||= (generate({ exactly: 4, maxLength: 5 }) as string[]).join('-');
-                messageStrings.push(`The tool resource was returned. You MUST use the readChatUrl(url: string) function within the evaluate_js tool to query this data using the following URL: \`chat://${token}\`. The readChatUrl return value MUST be assigned to a variable and processed within the evaluate_js script to extract the relevant data. It MUST NOT be returned directly as the evaluate_js result.`);
+                if (tool.function.name === EvaluateJsToolFunctionName) {
+                    messageStrings.push(`The evaluate_js tool returned a result that was too large to return in full. You MUST modify the script to return less data. If the script returned the result of readChatUrl directly, you MUST instead assign it to a variable, process it within the script, and return only the relevant data. The full result can be queried within the evaluate_js tool using the readChatUrl(url: string) function with the following URL: \`chat://${token}\`.`);
+                }
+                else {
+                    messageStrings.push(`The tool resource was returned. You MUST use the readChatUrl(url: string) function within the evaluate_js tool to query this data using the following URL: \`chat://${token}\`. The readChatUrl return value MUST be assigned to a variable and processed within the evaluate_js script to extract the relevant data. It MUST NOT be returned directly as the evaluate_js result.`);
+                }
                 messages.callToolResult._meta ||= {};
                 const meta: any = messages.callToolResult._meta['chat.scrypted.app/'] ||= {};
                 meta.resources ||= [];
