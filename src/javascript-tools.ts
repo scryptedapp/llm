@@ -43,7 +43,7 @@ export function getEvaluateJsToolFunction(): ChatCompletionFunctionTool {
         type: 'function',
         function: {
             name: EvaluateJsToolFunctionName,
-            description: 'Evaluates JavaScript in the browser using the standard eval function. This tool MUST be used for calculations and checking the current time. You can also use it to determine the user locale.',
+            description: 'Evaluates JavaScript in the browser using the standard eval function. This tool MUST be used for calculations and checking the current time. You can also use it to determine the user locale. The readChatUrl(url: string) function is available within the script to retrieve data referenced by chat:// urls. The readChatUrl return value MUST be assigned to a variable and processed within the script to extract only the relevant data, e.g. `const data = readChatUrl(url); return data.someProperty;`. The readChatUrl return value MUST NOT be returned directly as the script result.',
             parameters: {
                 type: 'object',
                 properties: {
