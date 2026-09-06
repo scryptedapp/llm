@@ -105,17 +105,16 @@ abstract class BaseLLM extends ScryptedDeviceBase implements StreamService<Buffe
                 const lastMessage = body.messages[body.messages.length - 1];
                 if (lastMessage?.role === 'user' || lastMessage?.role === 'tool')
                     break;
+                // continuing the final assistant message is valid in one way
+                // streaming mode (no userMessages) as well.
+                if (body.continue_final_message)
+                    break;
                 if (!userMessages)
                     throw new Error('Last message must not be from the assistant.');
-                if (!body.continue_final_message) {
-                    const userMessage = await userMessages.next();
-                    if (userMessage.done)
-                        throw new Error('No user message provided for last message.');
-                    body.messages.push(...userMessage.value);
-                }
-                else {
-                    break;
-                }
+                const userMessage = await userMessages.next();
+                if (userMessage.done)
+                    throw new Error('No user message provided for last message.');
+                body.messages.push(...userMessage.value);
             }
         };
 
@@ -818,6 +817,11 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
     async onOpenAIEndpointRequest(request: HttpRequest, response: HttpResponse): Promise<void> {
         const body = JSON.parse(request.body?.toString()!);
         const { model } = body;
+        // the model field routes the request to the ChatCompletion device.
+        // remove it from the body so the device does not forward the device id
+        // to the upstream provider as the model name: each device will fill in
+        // its own configured model.
+        delete body.model;
         if (!request.username || (request.aclId && !await checkUserId(model, request.aclId))) {
             return response.send('', {
                 code: 401,
@@ -831,18 +835,42 @@ export default class LLMPlugin extends ScryptedDeviceBase implements DeviceProvi
             });
         }
 
-        if (body.stream) {
-            response.sendStream((async function* () {
-                const stream = await chatCompletion.streamChatCompletion(body);
-                for await (const chunk of stream) {
-                    if (chunk.object === 'chat.completion') {
-                        yield Buffer.from(`data: [DONE]\n\n`);
-                    }
-                    else {
-                        yield Buffer.from(`data: ${JSON.stringify(chunk)}\n\n`);
+if (body.stream) {
+            // the server pulls the sendStream iterator one rpc round trip per item,
+            // which paces delivery. merge all pending buffers with each new buffer
+            // so a pull grabs everything available in a single round trip. deltas
+            // are routed through the streaming callback, which is pushed via one
+            // way rpc events rather than pulled.
+            const queue = createAsyncQueue<Buffer>();
+            const submitMerged = (buffer: Buffer) => {
+                const pending = queue.clear();
+                queue.submit(Buffer.concat([...pending, buffer]));
+            };
+            const stream = await chatCompletion.streamChatCompletion(body, undefined, (chunk) => {
+                submitMerged(Buffer.from(`data: ${JSON.stringify(chunk)}\n\n`));
+                return Promise.resolve(true);
+            });
+            (async () => {
+                try {
+                    for await (const message of stream) {
+                        // with a callback provided, the wrapper only yields
+                        // non-delta messages, e.g. the usage chunk and the
+                        // final chat completion.
+                        if (message?.object === 'chat.completion') {
+                            submitMerged(Buffer.from(`data: [DONE]\n\n`));
+                        }
+                        else if (message) {
+                            submitMerged(Buffer.from(`data: ${JSON.stringify(message)}\n\n`));
+                        }
                     }
                 }
-            })(), {
+                catch (e) {
+                    queue.end(e instanceof Error ? e : new Error(String(e)));
+                    return;
+                }
+                queue.end();
+            })();
+            response.sendStream(queue.queue, {
                 headers: {
                     'Content-Type': 'text/event-stream; charset=utf-8',
                 },
